@@ -22,7 +22,7 @@
 
 <div class="download-buttons">
 <a class="dl-btn dl-start" href="preface.html">开始阅读</a>
-<a class="dl-btn dl-epub" href="https://github.com/nickarora/fridabook">源码</a>
+<a class="dl-btn dl-epub" href="https://github.com/fridabook/fridabook.github.io">源码</a>
 </div>
 
 <br/>
