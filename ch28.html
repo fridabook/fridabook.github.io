@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第28章 性能优化——速度的追求 - 解密 Frida</title>
+<style>
+:root {
+  --sidebar-w:300px; --bg:#101418; --bg-side:#141a1e; --fg:#d4dde0;
+  --fg-dim:#8899a6; --accent:#ff6b35; --accent2:#e8a317;
+  --code-bg:#181e24; --border:#283038; --hover:#1c2428; --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--fg);line-height:1.85;font-size:15px;
+}
+
+/* ── 布局 ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+  background:var(--bg-side);border-right:1px solid var(--border);
+  overflow-y:auto;z-index:100;display:flex;flex-direction:column;
+}
+.sidebar-header{padding:1.4rem 1.2rem .8rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-header h1{font-size:1.05rem;color:var(--accent);margin:0;font-weight:700}
+.sidebar-header p{font-size:.72rem;color:var(--fg-dim);margin-top:.25rem}
+.sidebar-search{padding:.7rem 1.2rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-search input{
+  width:100%;padding:.4rem .7rem;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--fg);font-size:.8rem;outline:none;
+}
+.sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search input::placeholder{color:var(--fg-dim)}
+.toc{padding:.5rem 0;overflow-y:auto;flex:1}
+.toc-group{
+  padding:.85rem 1.2rem .25rem;font-size:.68rem;font-weight:700;
+  color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;
+}
+.toc-item{
+  display:block;padding:.3rem 1.2rem .3rem 1.5rem;font-size:.8rem;
+  color:var(--fg-dim);text-decoration:none;border-left:3px solid transparent;
+  transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.toc-item:hover{color:var(--fg);background:var(--hover)}
+.toc-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--hover);font-weight:600}
+.toc-item.hidden{display:none}
+.toc-item .read-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:6px;flex-shrink:0;background:transparent;vertical-align:middle;
+}
+.toc-item .read-dot.done{background:#4ade80}
+
+/* ── 阅读进度面板 ── */
+.progress-panel{
+  border-top:1px solid var(--border);padding:.9rem 1.2rem;flex-shrink:0;
+}
+.progress-panel .progress-title{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:.72rem;color:var(--fg-dim);margin-bottom:.45rem;
+}
+.progress-panel .progress-title button{
+  background:none;border:none;color:var(--fg-dim);font-size:.68rem;
+  cursor:pointer;padding:0;text-decoration:underline;
+}
+.progress-panel .progress-title button:hover{color:var(--accent)}
+.progress-track{
+  width:100%;height:6px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+}
+.progress-track .progress-fill{
+  height:100%;border-radius:3px;transition:width .4s;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-panel .progress-text{
+  font-size:.7rem;color:var(--fg-dim);margin-top:.35rem;text-align:center;
+}
+.progress-panel .last-read{
+  font-size:.68rem;color:var(--fg-dim);margin-top:.5rem;padding-top:.45rem;
+  border-top:1px solid var(--border);
+}
+.progress-panel .last-read a{
+  color:var(--accent);font-size:.72rem;
+}
+
+/* ── 内容 ── */
+.content{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.chapter{max-width:820px;margin:0 auto;padding:2.5rem 3rem 3rem}
+
+/* ── 排版 ── */
+h1{font-size:1.8rem;color:var(--accent);margin:1.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent);line-height:1.3}
+h2{font-size:1.3rem;color:#e8a317;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.08rem;color:#f0c050;margin:1.5rem 0 .5rem}
+h4{font-size:1rem;color:#b8c8d0;margin:1.2rem 0 .4rem}
+p{margin:.7rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:#fff;font-weight:600}
+em{color:#a0b4be}
+
+/* ── 代码 ── */
+code{
+  background:var(--code-bg);padding:.14em .42em;border-radius:4px;
+  font-size:.87em;font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;color:#e0c080;
+}
+pre{
+  background:var(--code-bg);padding:1rem 1.2rem;border-radius:var(--radius);
+  overflow-x:auto;margin:1rem 0;border:1px solid var(--border);line-height:1.55;
+}
+pre code{background:none;padding:0;color:var(--fg);font-size:.84em}
+
+/* ── 表格 ── */
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9em}
+th,td{border:1px solid var(--border);padding:.45rem .75rem;text-align:left}
+th{background:var(--code-bg);color:var(--accent);font-weight:600;font-size:.86em}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── 引用 / 列表 / 其他 ── */
+blockquote{border-left:4px solid var(--accent2);padding:.4rem 1rem;margin:1rem 0;color:var(--fg-dim);background:rgba(232,163,23,.08);border-radius:0 var(--radius) var(--radius) 0}
+blockquote p{margin:.25rem 0}
+ul,ol{padding-left:1.5rem;margin:.5rem 0}
+li{margin:.25rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+img{max-width:100%;border-radius:var(--radius)}
+
+/* ── 下载按钮 ── */
+.download-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0}
+.dl-btn{
+  display:inline-block;padding:.65rem 1.8rem;border-radius:var(--radius);
+  font-size:.95rem;font-weight:600;text-decoration:none;transition:all .2s;
+  border:2px solid var(--border);
+}
+.dl-btn:hover{text-decoration:none}
+.dl-start{background:var(--accent);color:#000;border-color:var(--accent)}
+.dl-start:hover{background:#e85a2a;border-color:#e85a2a;color:#000}
+.dl-pdf{background:transparent;color:var(--fg);border-color:var(--accent)}
+.dl-pdf:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.dl-epub{background:transparent;color:var(--fg);border-color:var(--border)}
+.dl-epub:hover{border-color:var(--accent);color:var(--accent)}
+.version-info{font-size:.8rem;color:var(--fg-dim)}
+
+/* ── 翻页导航 ── */
+.page-nav{
+  display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+}
+.page-nav a{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.55rem 1.1rem;border-radius:var(--radius);
+  background:var(--code-bg);border:1px solid var(--border);
+  color:var(--fg);font-size:.85rem;text-decoration:none;transition:all .2s;
+  max-width:45%;
+}
+.page-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.page-nav a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-nav .spacer{flex:1}
+
+/* ── 进度条 ── */
+.progress-bar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:3px;z-index:110}
+.progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .1s}
+
+/* ── 回到顶部 ── */
+.back-top{
+  position:fixed;bottom:2rem;right:2rem;width:2.4rem;height:2.4rem;border-radius:50%;
+  background:var(--accent2);color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;transition:opacity .3s;display:flex;align-items:center;justify-content:center;z-index:80;
+}
+.back-top.show{opacity:.8}
+.back-top:hover{opacity:1}
+
+/* ── 移动端 ── */
+.menu-btn{
+  display:none;position:fixed;top:.7rem;left:.7rem;z-index:200;
+  background:var(--bg-side);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--accent);font-size:1.2rem;width:2.4rem;height:2.4rem;cursor:pointer;
+  align-items:center;justify-content:center;
+}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+@media(max-width:900px){
+  :root{--sidebar-w:270px}
+  .chapter{padding:2rem 1.5rem 2.5rem}
+}
+@media(max-width:700px){
+  .sidebar{transform:translateX(-100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .menu-btn{display:flex}
+  .overlay.show{display:block}
+  .chapter{padding:3.2rem 1.1rem 2.5rem}
+  .progress-bar{left:0}
+  h1{font-size:1.45rem} h2{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<div class="progress-bar"><div class="bar"></div></div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1><a href="/" style="color:inherit;text-decoration:none">解密 Frida</a></h1>
+      <p>动态插桩框架源码之旅</p>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" placeholder="搜索章节..." oninput="filterToc(this.value)">
+    </div>
+    <div class="toc"><a class="toc-item" href="cover.html" data-cid="cover"><span class="read-dot" data-cid="cover"></span>封面</a>
+<a class="toc-item" href="preface.html" data-cid="preface"><span class="read-dot" data-cid="preface"></span>前言</a>
+<div class="toc-group">第一部分 起步篇</div>
+<a class="toc-item" href="ch01.html" data-cid="ch01"><span class="read-dot" data-cid="ch01"></span>第1章 走进 Frida 的世界</a>
+<a class="toc-item" href="ch02.html" data-cid="ch02"><span class="read-dot" data-cid="ch02"></span>第2章 源码全景地图</a>
+<a class="toc-item" href="ch03.html" data-cid="ch03"><span class="read-dot" data-cid="ch03"></span>第3章 语言基础速览：C、Vala 与 JavaScript</a>
+<div class="toc-group">第二部分 核心架构篇</div>
+<a class="toc-item" href="ch04.html" data-cid="ch04"><span class="read-dot" data-cid="ch04"></span>第4章 程序的大门——入口与启动流程</a>
+<a class="toc-item" href="ch05.html" data-cid="ch05"><span class="read-dot" data-cid="ch05"></span>第5章 Gum：插桩引擎的心脏</a>
+<a class="toc-item" href="ch06.html" data-cid="ch06"><span class="read-dot" data-cid="ch06"></span>第6章 核心数据结构与接口定义</a>
+<a class="toc-item" href="ch07.html" data-cid="ch07"><span class="read-dot" data-cid="ch07"></span>第7章 构建系统——Meson 与交叉编译</a>
+<div class="toc-group">第三部分 插桩引擎篇</div>
+<a class="toc-item" href="ch08.html" data-cid="ch08"><span class="read-dot" data-cid="ch08"></span>第8章 Interceptor——函数钩子的魔法</a>
+<a class="toc-item" href="ch09.html" data-cid="ch09"><span class="read-dot" data-cid="ch09"></span>第9章 Stalker——代码追踪引擎</a>
+<a class="toc-item" href="ch10.html" data-cid="ch10"><span class="read-dot" data-cid="ch10"></span>第10章 代码生成器——跨架构的机器语言</a>
+<a class="toc-item" href="ch11.html" data-cid="ch11"><span class="read-dot" data-cid="ch11"></span>第11章 Relocator——代码搬迁的艺术</a>
+<div class="toc-group">第四部分 注入与代理篇</div>
+<a class="toc-item" href="ch12.html" data-cid="ch12"><span class="read-dot" data-cid="ch12"></span>第12章 进程注入——打入目标的第一步</a>
+<a class="toc-item" href="ch13.html" data-cid="ch13"><span class="read-dot" data-cid="ch13"></span>第13章 Agent 生命周期——注入后的世界</a>
+<a class="toc-item" href="ch14.html" data-cid="ch14"><span class="read-dot" data-cid="ch14"></span>第14章 脚本引擎——JavaScript 遇见原生代码</a>
+<a class="toc-item" href="ch15.html" data-cid="ch15"><span class="read-dot" data-cid="ch15"></span>第15章 Gadget 模式——无需注入的插桩</a>
+<div class="toc-group">第五部分 平台子系统篇</div>
+<a class="toc-item" href="ch16.html" data-cid="ch16"><span class="read-dot" data-cid="ch16"></span>第16章 Linux 后端——ptrace 与 ELF 的世界</a>
+<a class="toc-item" href="ch17.html" data-cid="ch17"><span class="read-dot" data-cid="ch17"></span>第17章 Darwin 后端——Mach 端口与 XPC</a>
+<a class="toc-item" href="ch18.html" data-cid="ch18"><span class="read-dot" data-cid="ch18"></span>第18章 Windows 后端——远程线程与调试符号</a>
+<a class="toc-item" href="ch19.html" data-cid="ch19"><span class="read-dot" data-cid="ch19"></span>第19章 移动平台——Android 与 iOS 的特殊挑战</a>
+<div class="toc-group">第六部分 通信与协议篇</div>
+<a class="toc-item" href="ch20.html" data-cid="ch20"><span class="read-dot" data-cid="ch20"></span>第20章 DBus 协议——通信的骨架</a>
+<a class="toc-item" href="ch21.html" data-cid="ch21"><span class="read-dot" data-cid="ch21"></span>第21章 控制服务——网络上的 Frida</a>
+<a class="toc-item" href="ch22.html" data-cid="ch22"><span class="read-dot" data-cid="ch22"></span>第22章 消息系统——脚本与宿主的对话</a>
+<div class="toc-group">第七部分 绑定与工具篇</div>
+<a class="toc-item" href="ch23.html" data-cid="ch23"><span class="read-dot" data-cid="ch23"></span>第23章 Python 绑定——最受欢迎的接口</a>
+<a class="toc-item" href="ch24.html" data-cid="ch24"><span class="read-dot" data-cid="ch24"></span>第24章 Node.js 绑定与其他语言</a>
+<a class="toc-item" href="ch25.html" data-cid="ch25"><span class="read-dot" data-cid="ch25"></span>第25章 命令行工具——frida-tools 全家桶</a>
+<div class="toc-group">第八部分 高级话题篇</div>
+<a class="toc-item" href="ch26.html" data-cid="ch26"><span class="read-dot" data-cid="ch26"></span>第26章 内存操作——扫描、监控与读写</a>
+<a class="toc-item" href="ch27.html" data-cid="ch27"><span class="read-dot" data-cid="ch27"></span>第27章 跨平台设计——一套代码，多个世界</a>
+<a class="toc-item active" href="ch28.html" data-cid="ch28"><span class="read-dot" data-cid="ch28"></span>第28章 性能优化——速度的追求</a>
+<div class="toc-group">第九部分 总结篇</div>
+<a class="toc-item" href="ch29.html" data-cid="ch29"><span class="read-dot" data-cid="ch29"></span>第29章 架构之美——设计模式总结</a>
+<a class="toc-item" href="ch30.html" data-cid="ch30"><span class="read-dot" data-cid="ch30"></span>第30章 你的下一步——从读者到贡献者</a>
+<div class="toc-group">附录</div>
+<a class="toc-item" href="appendix-a.html" data-cid="appendix-a"><span class="read-dot" data-cid="appendix-a"></span>附录 A 术语表</a>
+<a class="toc-item" href="appendix-b.html" data-cid="appendix-b"><span class="read-dot" data-cid="appendix-b"></span>附录 B 源码关键文件索引</a>
+<a class="toc-item" href="appendix-c.html" data-cid="appendix-c"><span class="read-dot" data-cid="appendix-c"></span>附录 C 全书知识地图</a>
+<a class="toc-item" href="about.html" data-cid="about"><span class="read-dot" data-cid="about"></span>关于本书</a></div>
+    <div class="progress-panel">
+      <div class="progress-title">
+        <span>阅读进度</span>
+        <button onclick="clearProgress()">清除记录</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="readFill"></div></div>
+      <div class="progress-text" id="readText">0 / 0 章</div>
+      <div class="last-read" id="lastRead"></div>
+    </div>
+  </nav>
+
+  <main class="content">
+    <article class="chapter">
+<h1 id="ch28-h1">第28章：性能优化——速度的追求</h1>
+
+<blockquote><p>给一辆行驶中的汽车换轮胎，你不仅要换得上，还要换得快——不然车就翻了。Frida 的性能优化就是在解决这个问题：如何在不拖慢目标程序的前提下，完成复杂的插桩任务？</p></blockquote>
+
+<h2 id="ch28-h2">28.1 为什么性能至关重要</h2>
+
+<p>动态插桩工具面临一个根本矛盾：你插入的每一行监控代码都会增加目标程序的执行时间。如果一个函数原本执行 100 纳秒，你的 Hook 引入了 10 微秒的开销，那就是 100 倍的减速。在实时系统、游戏、高频交易等场景中，这种减速是不可接受的。</p>
+
+<p>所以 Frida 在每一个关键路径上都做了精心的优化。让我们逐一拆解这些优化策略。</p>
+
+<h2 id="ch28-h3">28.2 Stalker 的反向补丁（Backpatching）</h2>
+
+<p>Stalker 是 Frida 的代码跟踪引擎，它通过动态翻译（JIT）来跟踪程序的每一条指令。在上一章我们了解了 Stalker 的基本原理，这里我们聚焦它的性能优化。</p>
+
+<h3 id="ch28-h4">问题：间接跳转的开销</h3>
+
+<p>当 Stalker 遇到一个间接跳转（比如 <code>blr x8</code> 或 <code>call [rax]</code>），它不知道目标地址是什么，必须查找翻译后的代码块：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────┐
+│     没有优化的间接跳转处理                    │
+│                                             │
+│  原始代码: blr x8                            │
+│                                             │
+│  翻译后:                                     │
+│    1. 保存 CPU 上下文                        │
+│    2. 调用 C 函数查找目标块                   │
+│       -&gt; 查哈希表                            │
+│       -&gt; 如果没翻译过，翻译目标代码            │
+│    3. 恢复 CPU 上下文                        │
+│    4. 跳转到翻译后的代码                     │
+│                                             │
+│  开销：保存/恢复上下文 + 函数调用 + 哈希查找   │
+│  每次间接跳转都要走这条慢路径                  │
+└─────────────────────────────────────────────┘
+</code></pre>
+
+<h3 id="ch28-h5">解决方案：内联缓存 + 反向补丁</h3>
+
+<p>Stalker 使用了两层优化：</p>
+
+<p><strong>第一层：内联缓存（Inline Cache, IC）</strong></p>
+
+<pre><code>
+┌─────────────────────────────────────────────┐
+│     内联缓存工作原理                          │
+│                                             │
+│  翻译后的代码附带一个小缓存表(IC Entry):       │
+│                                             │
+│  ┌──────────────────────────────┐           │
+│  │ slot[0]: target=0xA -&gt; 0xA&#x27; │  命中!     │
+│  │ slot[1]: target=0xB -&gt; 0xB&#x27; │  直接跳    │
+│  │ slot[2]: (empty)            │  未命中     │
+│  └──────────────────────────────┘           │
+│                                             │
+│  执行流程:                                   │
+│    cmp x8, [slot0.target]                   │
+│    b.eq slot0.translated     // 快速路径     │
+│    cmp x8, [slot1.target]                   │
+│    b.eq slot1.translated     // 快速路径     │
+│    b slow_path               // 慢速路径     │
+│                                             │
+│  快速路径：2-3 条比较指令，无函数调用          │
+│  慢速路径：完整的查找流程                     │
+└─────────────────────────────────────────────┘
+</code></pre>
+
+<p><strong>第二层：反向补丁（Backpatching）</strong></p>
+
+<p>当 Stalker 第一次翻译完一个代码块后，它可以&quot;回去&quot;把之前的间接跳转直接改写为直接跳转：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────┐
+│     反向补丁示例                              │
+│                                             │
+│  初始状态（块 A 翻译时，块 B 还未翻译）：      │
+│    块A: ... -&gt; [查找B的入口] -&gt; 慢路径        │
+│                                             │
+│  翻译块 B 之后，回去修改块 A：                 │
+│    块A: ... -&gt; [直接跳转到B&#x27;] -&gt; 快速！       │
+│                                             │
+│  这就是&quot;反向&quot;的含义：                         │
+│  翻译新块时，回头修补指向它的旧跳转            │
+└─────────────────────────────────────────────┘
+</code></pre>
+
+<p>源码中 <code>gumstalker.h</code> 定义了 <code>gum_stalker_prefetch_backpatch</code>、<code>gum_stalker_backpatch_get_from/to</code> 等 API，<code>GumStalkerObserver</code> 接口允许外部观察者接收反向补丁通知，支持构建更高级的优化。</p>
+
+<h2 id="ch28-h6">28.3 Interceptor 的 Trampoline 设计</h2>
+
+<p>Interceptor 是 Frida 最常用的 Hook 机制。它的性能关键在于 Trampoline（跳板）的设计。</p>
+
+<p>Trampoline 的核心思想是<strong>快慢分离</strong>：先检查有没有活跃的 listener，如果没有就直接跳到原始代码（零开销快速路径）；只有在需要时才走完整的保存上下文、调用回调、恢复上下文的慢速路径。</p>
+
+<p>另一个关键优化是<strong>近距离分配</strong>。Trampoline 代码通过 <code>gum_alloc_n_pages_near</code> 分配在目标函数附近。在 ARM64 上，近距离跳转只需一条 <code>B</code> 指令（4字节），而远距离跳转需要 <code>ADRP+ADD+BR</code> 三条指令（12字节以上）。在热点函数中，这种差距会被放大数百万倍。</p>
+
+<h2 id="ch28-h7">28.4 线程局部存储：避免锁竞争</h2>
+
+<p>在多线程环境中，锁是性能杀手。Frida 大量使用线程局部存储（TLS）来避免加锁：</p>
+
+<pre><code class="language-c">
+// gumtls.h
+typedef gsize GumTlsKey;
+
+GumTlsKey gum_tls_key_new (void);
+gpointer gum_tls_key_get_value (GumTlsKey key);
+void gum_tls_key_set_value (GumTlsKey key, gpointer value);
+</code></pre>
+
+<p>Stalker 的 <code>GumExecCtx</code>（执行上下文）就是按线程存储的：</p>
+
+<pre><code>
+┌──────────────────────────────────────────────┐
+│     线程局部存储避免锁竞争                     │
+│                                              │
+│  传统方式 (需要锁):                            │
+│    Thread A ──┐                              │
+│    Thread B ──┤── lock ── shared_ctx ── unlock│
+│    Thread C ──┘     (串行化，性能瓶颈)        │
+│                                              │
+│  TLS 方式 (无锁):                             │
+│    Thread A ──── TLS[key] ──── ctx_A         │
+│    Thread B ──── TLS[key] ──── ctx_B         │
+│    Thread C ──── TLS[key] ──── ctx_C         │
+│    (完全并行，零竞争)                         │
+│                                              │
+└──────────────────────────────────────────────┘
+</code></pre>
+
+<p>每个被跟踪的线程都有自己独立的执行上下文（<code>GumExecCtx</code>），包含独立的代码生成器、代码缓存等。这样不同线程的 Stalker 实例之间完全不需要同步。</p>
+
+<p>唯一需要同步的场景是跨线程操作，比如从主线程停止另一个线程的跟踪。这时 Frida 使用原子操作而非互斥锁：</p>
+
+<pre><code class="language-c">
+struct _GumExecCtx
+{
+  volatile gint state;  // 用原子操作而非锁来管理状态
+  // ...
+};
+</code></pre>
+
+<h2 id="ch28-h8">28.5 Slab 分配器：减少系统调用</h2>
+
+<p>频繁的 <code>mmap</code>/<code>munmap</code> 系统调用开销很大。Stalker 使用 Slab 分配策略来批量管理内存：</p>
+
+<pre><code>
+┌──────────────────────────────────────────────┐
+│        Slab 分配策略                          │
+│                                              │
+│  传统方式：每个代码块单独 mmap                 │
+│    mmap(4KB) -&gt; 块A                          │
+│    mmap(4KB) -&gt; 块B                          │
+│    mmap(4KB) -&gt; 块C                          │
+│    3次系统调用                                │
+│                                              │
+│  Slab 方式：预分配大块，内部切分               │
+│    mmap(64KB) -&gt; Slab                        │
+│    ┌──────────────────────────────┐          │
+│    │ 块A │ 块B │ 块C │ ... │ 空闲 │          │
+│    └──────────────────────────────┘          │
+│    1次系统调用                                │
+│                                              │
+└──────────────────────────────────────────────┘
+</code></pre>
+
+<p>从源码中可以看到 Slab 的数据结构：</p>
+
+<pre><code class="language-c">
+struct _GumSlab
+{
+  guint8 * data;         // 数据区起始
+  guint offset;          // 当前分配偏移
+  guint size;            // 可用大小
+  guint memory_size;     // 实际映射大小
+  GumSlab * next;        // 链接到下一个 Slab
+};
+
+struct _GumCodeSlab
+{
+  GumSlab slab;
+  gpointer invalidator;  // 代码失效处理器
+};
+
+struct _GumDataSlab
+{
+  GumSlab slab;
+};
+</code></pre>
+
+<p>Stalker 的执行上下文中维护着多种 Slab：</p>
+
+<pre><code class="language-c">
+struct _GumExecCtx
+{
+  // ...
+  GumCodeSlab * code_slab;     // 翻译后的代码
+  GumSlowSlab * slow_slab;     // 慢速路径代码
+  GumDataSlab * data_slab;     // 数据（如内联缓存）
+  GumCodeSlab * scratch_slab;  // 临时工作区
+  // ...
+};
+</code></pre>
+
+<p>分配新的代码块时，只需移动 <code>offset</code> 指针即可，就像在一个大笔记本上往后翻页写字——不需要每次都去文具店买新笔记本。</p>
+
+<p>当一个 Slab 写满了，就分配新的 Slab 并通过 <code>next</code> 指针链接。这种链式 Slab 结构在空间和时间上都取得了很好的平衡。</p>
+
+<h2 id="ch28-h9">28.6 自旋锁与独立堆</h2>
+
+<p>Frida 嵌入了 dlmalloc 并维护两个独立的 mspace（<code>gum_mspace_main</code> 和 <code>gum_mspace_internal</code>），既避免与目标进程冲突，又通过分别控制锁粒度来优化性能。</p>
+
+<p>在代码生成的关键路径上，Stalker 的 <code>GumExecCtx</code> 使用 <code>GumSpinlock</code>（自旋锁）而非互斥锁来保护代码 Slab。自旋锁在获取失败时循环重试而非休眠，避免了上下文切换的微秒级开销，对于只需几十条指令的极短临界区来说是更好的选择。</p>
+
+<h2 id="ch28-h10">28.7 最小化 Prolog/Epilog</h2>
+
+<p>插入回调时必须保存和恢复 CPU 上下文。Frida 提供三个级别：<code>GUM_PROLOG_NONE</code>（0条指令，纯跳转）、<code>GUM_PROLOG_MINIMAL</code>（约10条指令，只保存必要寄存器）、<code>GUM_PROLOG_FULL</code>（约40条指令，保存全部寄存器和 SIMD）。Stalker 还缓存了各级别 Prolog/Epilog 的代码地址（<code>last_prolog_minimal</code> 等），多个代码块通过 <code>BL</code> 共享同一份代码，既节省空间又利用指令缓存。</p>
+
+<h2 id="ch28-h11">28.8 代码块的回收利用</h2>
+
+<p><code>GumExecBlock</code> 中的 <code>recycle_count</code> 记录代码块被重新翻译的次数。对于频繁自失效的代码块（如自修改代码），Stalker 据此调整策略，避免无限增长。</p>
+
+<h2 id="ch28-h12">28.9 优化的哲学</h2>
+
+<p>回顾 Frida 的所有性能优化，可以归纳出几个核心原则：</p>
+
+<pre><code>
+┌──────────────────────────────────────────────┐
+│       Frida 性能优化的核心原则                │
+├──────────────────────────────────────────────┤
+│                                              │
+│  1. 快慢分离                                  │
+│     热路径极致优化，冷路径可以慢               │
+│                                              │
+│  2. 空间换时间                                │
+│     内联缓存、Slab 预分配、Prolog 缓存        │
+│                                              │
+│  3. 避免同步                                  │
+│     TLS 替代锁、自旋锁替代互斥锁              │
+│     原子操作替代临界区                        │
+│                                              │
+│  4. 批量处理                                  │
+│     Slab 批量分配、反向补丁批量应用            │
+│                                              │
+│  5. 渐进优化                                  │
+│     第一次走慢路径，逐步优化为快路径           │
+│     内联缓存从空到满的过程                    │
+│                                              │
+└──────────────────────────────────────────────┘
+</code></pre>
+
+<p>这些原则不仅适用于 Frida，也适用于任何需要极致性能的系统软件。关键洞察是：<strong>一次性的高开销操作（如翻译代码块）可以被分摊到后续无数次的快速执行中</strong>——这就是 JIT 编译的核心思想。</p>
+
+<h2 id="ch28-h13">28.10 本章小结</h2>
+
+<ul>
+<li>- Stalker 的反向补丁和内联缓存将间接跳转的开销从&quot;函数调用+哈希查找&quot;降低到&quot;几条比较指令&quot;</li>
+<li>- Interceptor 的 Trampoline 设计在 Hook 被禁用时几乎零开销</li>
+<li>- 线程局部存储（TLS）让每个线程拥有独立的执行上下文，消除了锁竞争</li>
+<li>- Slab 分配器通过批量分配内存，将多次系统调用减少为一次</li>
+<li>- 自旋锁用于保护极短的临界区，避免了上下文切换的开销</li>
+<li>- 分级的 Prolog/Epilog 让不需要完整上下文的操作只付最小代价</li>
+<li>- Frida 嵌入 dlmalloc 并使用独立 mspace，既避免冲突又优化分配性能</li>
+<li>- 性能优化的核心是&quot;快慢分离&quot;——让常见情况极快，罕见情况可以慢</li>
+</ul>
+
+<h2 id="ch28-h14">讨论问题</h2>
+
+<ol>
+<li>1. Stalker 的内联缓存大小是有限的（通常只有几个槽位）。如果一个间接跳转的目标非常多变（比如虚函数表的分发），内联缓存会频繁失效。你能想到什么应对策略？</li>
+</ol>
+
+<ol>
+<li>2. Frida 使用自旋锁保护代码生成的临界区。如果目标进程是一个只有单核 CPU 的嵌入式设备，自旋锁还是好的选择吗？为什么？</li>
+</ol>
+
+<ol>
+<li>3. &quot;渐进优化&quot;策略（第一次慢，之后快）和&quot;预编译&quot;策略（启动时全部翻译）各有什么优缺点？在什么场景下你会选择哪种？</li>
+</ol>
+
+<hr/>
+
+<p><em>本书由 [everettjf] 使用 Claude Code 分析源码编写 | 保留出处即可自由转载</em></p>
+
+    </article>
+    <nav class="chapter page-nav">
+      <a href="ch27.html" data-dir="prev"><span>&#8592;</span> <span>第27章 跨平台设计——一套代码，多个世界</span></a>
+      <span class="spacer"></span>
+      <a href="ch29.html" data-dir="next"><span>第29章 架构之美——设计模式总结</span> <span>&#8594;</span></a>
+    </nav>
+  </main>
+</div>
+
+<button class="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function toggleSidebar(){
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+function filterToc(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.toc-item').forEach(a=>{
+    a.classList.toggle('hidden',q&&!a.textContent.toLowerCase().includes(q));
+  });
+}
+window.addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  const pct=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100;
+  document.querySelector('.progress-bar .bar').style.width=pct+'%';
+  document.querySelector('.back-top').classList.toggle('show',h.scrollTop>400);
+},{passive:true});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowLeft'){ const a=document.querySelector('.page-nav a[data-dir=prev]'); if(a) a.click(); }
+  if(e.key==='ArrowRight'){ const a=document.querySelector('.page-nav a[data-dir=next]'); if(a) a.click(); }
+});
+
+const STORAGE_KEY = 'frida_read_progress';
+const CURRENT_CID = 'ch28';
+const ALL_CIDS = ["cover", "preface", "ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07", "ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14", "ch15", "ch16", "ch17", "ch18", "ch19", "ch20", "ch21", "ch22", "ch23", "ch24", "ch25", "ch26", "ch27", "ch28", "ch29", "ch30", "appendix-a", "appendix-b", "appendix-c", "about"];
+const TOTAL = ALL_CIDS.length;
+
+function getProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveProgress(p){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+function markRead(){
+  const p = getProgress();
+  if(!p[CURRENT_CID]){
+    p[CURRENT_CID] = new Date().toISOString();
+    saveProgress(p);
+  }
+  renderProgress();
+}
+function clearProgress(){
+  if(!confirm('确定要清除所有阅读记录吗？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderProgress();
+}
+function renderProgress(){
+  const p = getProgress();
+  const readCount = ALL_CIDS.filter(id => p[id]).length;
+  const pct = TOTAL ? Math.round(readCount / TOTAL * 100) : 0;
+  const fill = document.getElementById('readFill');
+  const text = document.getElementById('readText');
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = readCount + ' / ' + TOTAL + ' 章（' + pct + '%）';
+  document.querySelectorAll('.read-dot').forEach(dot => {
+    dot.classList.toggle('done', !!p[dot.dataset.cid]);
+  });
+  const lastEl = document.getElementById('lastRead');
+  if(lastEl){
+    const entries = Object.entries(p).sort((a,b) => b[1].localeCompare(a[1]));
+    if(entries.length > 0){
+      const [lastCid, lastTime] = entries[0];
+      const link = document.querySelector('.toc-item[data-cid="'+lastCid+'"]');
+      const title = link ? link.textContent.trim() : lastCid;
+      const d = new Date(lastTime);
+      const timeStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+        +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      lastEl.innerHTML = '上次阅读：<a href="'+lastCid+'.html">'+title+'</a><br><span style="font-size:.65rem">'+timeStr+'</span>';
+    } else {
+      lastEl.innerHTML = '<span style="color:var(--fg-dim)">还没有阅读记录</span>';
+    }
+  }
+  if(readCount === TOTAL && TOTAL > 0 && fill){
+    fill.style.background = 'linear-gradient(90deg,#4ade80,#22d3ee)';
+  }
+}
+let _marked = false;
+window.addEventListener('scroll', ()=>{
+  if(_marked) return;
+  const h = document.documentElement;
+  const scrollPct = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  if(scrollPct > 0.8){
+    _marked = true;
+    markRead();
+  }
+}, {passive:true});
+window.addEventListener('load', ()=>{
+  const h = document.documentElement;
+  if(h.scrollHeight <= h.clientHeight * 1.3){
+    setTimeout(()=>{ markRead(); }, 2000);
+  }
+  renderProgress();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第3章 语言基础速览：C、Vala 与 JavaScript - 解密 Frida</title>
+<style>
+:root {
+  --sidebar-w:300px; --bg:#101418; --bg-side:#141a1e; --fg:#d4dde0;
+  --fg-dim:#8899a6; --accent:#ff6b35; --accent2:#e8a317;
+  --code-bg:#181e24; --border:#283038; --hover:#1c2428; --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--fg);line-height:1.85;font-size:15px;
+}
+
+/* ── 布局 ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+  background:var(--bg-side);border-right:1px solid var(--border);
+  overflow-y:auto;z-index:100;display:flex;flex-direction:column;
+}
+.sidebar-header{padding:1.4rem 1.2rem .8rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-header h1{font-size:1.05rem;color:var(--accent);margin:0;font-weight:700}
+.sidebar-header p{font-size:.72rem;color:var(--fg-dim);margin-top:.25rem}
+.sidebar-search{padding:.7rem 1.2rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-search input{
+  width:100%;padding:.4rem .7rem;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--fg);font-size:.8rem;outline:none;
+}
+.sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search input::placeholder{color:var(--fg-dim)}
+.toc{padding:.5rem 0;overflow-y:auto;flex:1}
+.toc-group{
+  padding:.85rem 1.2rem .25rem;font-size:.68rem;font-weight:700;
+  color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;
+}
+.toc-item{
+  display:block;padding:.3rem 1.2rem .3rem 1.5rem;font-size:.8rem;
+  color:var(--fg-dim);text-decoration:none;border-left:3px solid transparent;
+  transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.toc-item:hover{color:var(--fg);background:var(--hover)}
+.toc-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--hover);font-weight:600}
+.toc-item.hidden{display:none}
+.toc-item .read-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:6px;flex-shrink:0;background:transparent;vertical-align:middle;
+}
+.toc-item .read-dot.done{background:#4ade80}
+
+/* ── 阅读进度面板 ── */
+.progress-panel{
+  border-top:1px solid var(--border);padding:.9rem 1.2rem;flex-shrink:0;
+}
+.progress-panel .progress-title{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:.72rem;color:var(--fg-dim);margin-bottom:.45rem;
+}
+.progress-panel .progress-title button{
+  background:none;border:none;color:var(--fg-dim);font-size:.68rem;
+  cursor:pointer;padding:0;text-decoration:underline;
+}
+.progress-panel .progress-title button:hover{color:var(--accent)}
+.progress-track{
+  width:100%;height:6px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+}
+.progress-track .progress-fill{
+  height:100%;border-radius:3px;transition:width .4s;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-panel .progress-text{
+  font-size:.7rem;color:var(--fg-dim);margin-top:.35rem;text-align:center;
+}
+.progress-panel .last-read{
+  font-size:.68rem;color:var(--fg-dim);margin-top:.5rem;padding-top:.45rem;
+  border-top:1px solid var(--border);
+}
+.progress-panel .last-read a{
+  color:var(--accent);font-size:.72rem;
+}
+
+/* ── 内容 ── */
+.content{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.chapter{max-width:820px;margin:0 auto;padding:2.5rem 3rem 3rem}
+
+/* ── 排版 ── */
+h1{font-size:1.8rem;color:var(--accent);margin:1.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent);line-height:1.3}
+h2{font-size:1.3rem;color:#e8a317;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.08rem;color:#f0c050;margin:1.5rem 0 .5rem}
+h4{font-size:1rem;color:#b8c8d0;margin:1.2rem 0 .4rem}
+p{margin:.7rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:#fff;font-weight:600}
+em{color:#a0b4be}
+
+/* ── 代码 ── */
+code{
+  background:var(--code-bg);padding:.14em .42em;border-radius:4px;
+  font-size:.87em;font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;color:#e0c080;
+}
+pre{
+  background:var(--code-bg);padding:1rem 1.2rem;border-radius:var(--radius);
+  overflow-x:auto;margin:1rem 0;border:1px solid var(--border);line-height:1.55;
+}
+pre code{background:none;padding:0;color:var(--fg);font-size:.84em}
+
+/* ── 表格 ── */
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9em}
+th,td{border:1px solid var(--border);padding:.45rem .75rem;text-align:left}
+th{background:var(--code-bg);color:var(--accent);font-weight:600;font-size:.86em}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── 引用 / 列表 / 其他 ── */
+blockquote{border-left:4px solid var(--accent2);padding:.4rem 1rem;margin:1rem 0;color:var(--fg-dim);background:rgba(232,163,23,.08);border-radius:0 var(--radius) var(--radius) 0}
+blockquote p{margin:.25rem 0}
+ul,ol{padding-left:1.5rem;margin:.5rem 0}
+li{margin:.25rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+img{max-width:100%;border-radius:var(--radius)}
+
+/* ── 下载按钮 ── */
+.download-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0}
+.dl-btn{
+  display:inline-block;padding:.65rem 1.8rem;border-radius:var(--radius);
+  font-size:.95rem;font-weight:600;text-decoration:none;transition:all .2s;
+  border:2px solid var(--border);
+}
+.dl-btn:hover{text-decoration:none}
+.dl-start{background:var(--accent);color:#000;border-color:var(--accent)}
+.dl-start:hover{background:#e85a2a;border-color:#e85a2a;color:#000}
+.dl-pdf{background:transparent;color:var(--fg);border-color:var(--accent)}
+.dl-pdf:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.dl-epub{background:transparent;color:var(--fg);border-color:var(--border)}
+.dl-epub:hover{border-color:var(--accent);color:var(--accent)}
+.version-info{font-size:.8rem;color:var(--fg-dim)}
+
+/* ── 翻页导航 ── */
+.page-nav{
+  display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+}
+.page-nav a{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.55rem 1.1rem;border-radius:var(--radius);
+  background:var(--code-bg);border:1px solid var(--border);
+  color:var(--fg);font-size:.85rem;text-decoration:none;transition:all .2s;
+  max-width:45%;
+}
+.page-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.page-nav a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-nav .spacer{flex:1}
+
+/* ── 进度条 ── */
+.progress-bar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:3px;z-index:110}
+.progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .1s}
+
+/* ── 回到顶部 ── */
+.back-top{
+  position:fixed;bottom:2rem;right:2rem;width:2.4rem;height:2.4rem;border-radius:50%;
+  background:var(--accent2);color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;transition:opacity .3s;display:flex;align-items:center;justify-content:center;z-index:80;
+}
+.back-top.show{opacity:.8}
+.back-top:hover{opacity:1}
+
+/* ── 移动端 ── */
+.menu-btn{
+  display:none;position:fixed;top:.7rem;left:.7rem;z-index:200;
+  background:var(--bg-side);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--accent);font-size:1.2rem;width:2.4rem;height:2.4rem;cursor:pointer;
+  align-items:center;justify-content:center;
+}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+@media(max-width:900px){
+  :root{--sidebar-w:270px}
+  .chapter{padding:2rem 1.5rem 2.5rem}
+}
+@media(max-width:700px){
+  .sidebar{transform:translateX(-100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .menu-btn{display:flex}
+  .overlay.show{display:block}
+  .chapter{padding:3.2rem 1.1rem 2.5rem}
+  .progress-bar{left:0}
+  h1{font-size:1.45rem} h2{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<div class="progress-bar"><div class="bar"></div></div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1><a href="/" style="color:inherit;text-decoration:none">解密 Frida</a></h1>
+      <p>动态插桩框架源码之旅</p>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" placeholder="搜索章节..." oninput="filterToc(this.value)">
+    </div>
+    <div class="toc"><a class="toc-item" href="cover.html" data-cid="cover"><span class="read-dot" data-cid="cover"></span>封面</a>
+<a class="toc-item" href="preface.html" data-cid="preface"><span class="read-dot" data-cid="preface"></span>前言</a>
+<div class="toc-group">第一部分 起步篇</div>
+<a class="toc-item" href="ch01.html" data-cid="ch01"><span class="read-dot" data-cid="ch01"></span>第1章 走进 Frida 的世界</a>
+<a class="toc-item" href="ch02.html" data-cid="ch02"><span class="read-dot" data-cid="ch02"></span>第2章 源码全景地图</a>
+<a class="toc-item active" href="ch03.html" data-cid="ch03"><span class="read-dot" data-cid="ch03"></span>第3章 语言基础速览：C、Vala 与 JavaScript</a>
+<div class="toc-group">第二部分 核心架构篇</div>
+<a class="toc-item" href="ch04.html" data-cid="ch04"><span class="read-dot" data-cid="ch04"></span>第4章 程序的大门——入口与启动流程</a>
+<a class="toc-item" href="ch05.html" data-cid="ch05"><span class="read-dot" data-cid="ch05"></span>第5章 Gum：插桩引擎的心脏</a>
+<a class="toc-item" href="ch06.html" data-cid="ch06"><span class="read-dot" data-cid="ch06"></span>第6章 核心数据结构与接口定义</a>
+<a class="toc-item" href="ch07.html" data-cid="ch07"><span class="read-dot" data-cid="ch07"></span>第7章 构建系统——Meson 与交叉编译</a>
+<div class="toc-group">第三部分 插桩引擎篇</div>
+<a class="toc-item" href="ch08.html" data-cid="ch08"><span class="read-dot" data-cid="ch08"></span>第8章 Interceptor——函数钩子的魔法</a>
+<a class="toc-item" href="ch09.html" data-cid="ch09"><span class="read-dot" data-cid="ch09"></span>第9章 Stalker——代码追踪引擎</a>
+<a class="toc-item" href="ch10.html" data-cid="ch10"><span class="read-dot" data-cid="ch10"></span>第10章 代码生成器——跨架构的机器语言</a>
+<a class="toc-item" href="ch11.html" data-cid="ch11"><span class="read-dot" data-cid="ch11"></span>第11章 Relocator——代码搬迁的艺术</a>
+<div class="toc-group">第四部分 注入与代理篇</div>
+<a class="toc-item" href="ch12.html" data-cid="ch12"><span class="read-dot" data-cid="ch12"></span>第12章 进程注入——打入目标的第一步</a>
+<a class="toc-item" href="ch13.html" data-cid="ch13"><span class="read-dot" data-cid="ch13"></span>第13章 Agent 生命周期——注入后的世界</a>
+<a class="toc-item" href="ch14.html" data-cid="ch14"><span class="read-dot" data-cid="ch14"></span>第14章 脚本引擎——JavaScript 遇见原生代码</a>
+<a class="toc-item" href="ch15.html" data-cid="ch15"><span class="read-dot" data-cid="ch15"></span>第15章 Gadget 模式——无需注入的插桩</a>
+<div class="toc-group">第五部分 平台子系统篇</div>
+<a class="toc-item" href="ch16.html" data-cid="ch16"><span class="read-dot" data-cid="ch16"></span>第16章 Linux 后端——ptrace 与 ELF 的世界</a>
+<a class="toc-item" href="ch17.html" data-cid="ch17"><span class="read-dot" data-cid="ch17"></span>第17章 Darwin 后端——Mach 端口与 XPC</a>
+<a class="toc-item" href="ch18.html" data-cid="ch18"><span class="read-dot" data-cid="ch18"></span>第18章 Windows 后端——远程线程与调试符号</a>
+<a class="toc-item" href="ch19.html" data-cid="ch19"><span class="read-dot" data-cid="ch19"></span>第19章 移动平台——Android 与 iOS 的特殊挑战</a>
+<div class="toc-group">第六部分 通信与协议篇</div>
+<a class="toc-item" href="ch20.html" data-cid="ch20"><span class="read-dot" data-cid="ch20"></span>第20章 DBus 协议——通信的骨架</a>
+<a class="toc-item" href="ch21.html" data-cid="ch21"><span class="read-dot" data-cid="ch21"></span>第21章 控制服务——网络上的 Frida</a>
+<a class="toc-item" href="ch22.html" data-cid="ch22"><span class="read-dot" data-cid="ch22"></span>第22章 消息系统——脚本与宿主的对话</a>
+<div class="toc-group">第七部分 绑定与工具篇</div>
+<a class="toc-item" href="ch23.html" data-cid="ch23"><span class="read-dot" data-cid="ch23"></span>第23章 Python 绑定——最受欢迎的接口</a>
+<a class="toc-item" href="ch24.html" data-cid="ch24"><span class="read-dot" data-cid="ch24"></span>第24章 Node.js 绑定与其他语言</a>
+<a class="toc-item" href="ch25.html" data-cid="ch25"><span class="read-dot" data-cid="ch25"></span>第25章 命令行工具——frida-tools 全家桶</a>
+<div class="toc-group">第八部分 高级话题篇</div>
+<a class="toc-item" href="ch26.html" data-cid="ch26"><span class="read-dot" data-cid="ch26"></span>第26章 内存操作——扫描、监控与读写</a>
+<a class="toc-item" href="ch27.html" data-cid="ch27"><span class="read-dot" data-cid="ch27"></span>第27章 跨平台设计——一套代码，多个世界</a>
+<a class="toc-item" href="ch28.html" data-cid="ch28"><span class="read-dot" data-cid="ch28"></span>第28章 性能优化——速度的追求</a>
+<div class="toc-group">第九部分 总结篇</div>
+<a class="toc-item" href="ch29.html" data-cid="ch29"><span class="read-dot" data-cid="ch29"></span>第29章 架构之美——设计模式总结</a>
+<a class="toc-item" href="ch30.html" data-cid="ch30"><span class="read-dot" data-cid="ch30"></span>第30章 你的下一步——从读者到贡献者</a>
+<div class="toc-group">附录</div>
+<a class="toc-item" href="appendix-a.html" data-cid="appendix-a"><span class="read-dot" data-cid="appendix-a"></span>附录 A 术语表</a>
+<a class="toc-item" href="appendix-b.html" data-cid="appendix-b"><span class="read-dot" data-cid="appendix-b"></span>附录 B 源码关键文件索引</a>
+<a class="toc-item" href="appendix-c.html" data-cid="appendix-c"><span class="read-dot" data-cid="appendix-c"></span>附录 C 全书知识地图</a>
+<a class="toc-item" href="about.html" data-cid="about"><span class="read-dot" data-cid="about"></span>关于本书</a></div>
+    <div class="progress-panel">
+      <div class="progress-title">
+        <span>阅读进度</span>
+        <button onclick="clearProgress()">清除记录</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="readFill"></div></div>
+      <div class="progress-text" id="readText">0 / 0 章</div>
+      <div class="last-read" id="lastRead"></div>
+    </div>
+  </nav>
+
+  <main class="content">
+    <article class="chapter">
+<h1 id="ch03-h1">第3章：语言基础速览：C、Vala 与 JavaScript</h1>
+
+<blockquote><p>如果有人告诉你，一个项目同时使用了 C、Vala、JavaScript、Python 和 C++，你的第一反应是什么？&quot;这也太疯狂了吧！&quot;但 Frida 就是这样一个项目，而且它把这些语言组合得相当优雅。</p></blockquote>
+
+<p>别担心，你不需要精通所有这些语言才能读懂 Frida 源码。这一章的目标很明确：给你配上刚好够用的&quot;语言眼镜&quot;，让你在后续章节中遇到代码时不至于一头雾水。</p>
+
+<h2 id="ch03-h2">3.1 C 语言：Frida 的骨骼</h2>
+
+<p>frida-gum 这个最底层的引擎完全用 C 语言编写。C 语言在这里被选用的原因很简单：它是最接近硬件的高级语言，能精确控制内存布局和机器指令，而且几乎所有平台都能编译和运行 C 代码。</p>
+
+<h3 id="ch03-h3">你需要了解的 C 基础</h3>
+
+<p><strong>指针</strong>：在 Frida 源码中，指针无处不在。简单来说，指针就是一个&quot;地址&quot;。</p>
+
+<pre><code class="language-c">
+// 一个整数
+int value = 42;
+
+// 一个指针，存储的是 value 的内存地址
+int *ptr = &amp;value;
+
+// 通过指针读取值
+printf(&quot;%d\n&quot;, *ptr);  // 输出 42
+
+// gpointer 是 GLib 定义的通用指针类型
+// 在 Frida 代码中你会经常看到它
+gpointer address = (gpointer) 0x12345678;
+</code></pre>
+
+<p>把指针想象成一张写着门牌号的纸条。纸条本身不是房子，但拿着纸条你能找到房子。在 Frida 中，函数地址、内存地址、对象引用几乎都是通过指针来传递的。</p>
+
+<p><strong>结构体</strong>：C 语言用结构体来组织相关的数据。</p>
+
+<pre><code class="language-c">
+// Frida 中典型的结构体定义风格
+struct _GumInterceptor {
+    GObject parent;           // 继承自 GObject
+    GRecMutex mutex;          // 互斥锁
+    GHashTable *function_contexts;  // 函数上下文哈希表
+    // ...
+};
+</code></pre>
+
+<p>结构体就像一个档案袋，把相关的信息装在一起。<code>GumInterceptor</code> 这个结构体包含了拦截器运作所需的全部状态。</p>
+
+<p><strong>函数指针</strong>：这是理解 Frida 回调机制的关键。</p>
+
+<pre><code class="language-c">
+// 定义一个函数指针类型
+typedef void (* GumInvocationCallback) (GumInvocationContext *context,
+                                         gpointer user_data);
+
+// 使用函数指针：注册一个回调
+void my_callback(GumInvocationContext *context, gpointer user_data) {
+    printf(&quot;函数被调用了！\n&quot;);
+}
+
+// 把 my_callback 当作参数传递
+gum_interceptor_attach(interceptor, target_func, listener, NULL, 0);
+</code></pre>
+
+<p>函数指针就像是一个&quot;任务委托&quot;。你把一个函数交给 Frida，说&quot;等那个函数被调用时，帮我执行这段代码&quot;。这是整个 Interceptor 机制的基础。</p>
+
+<h3 id="ch03-h4">GLib/GObject 类型系统</h3>
+
+<p>Frida 大量使用了 GLib 库，这是 GNOME 项目的基础库。你需要认识一些常见的 GLib 类型：</p>
+
+<pre><code>
+┌────────────────────────────────────────────┐
+│          GLib 常见类型速查                   │
+├──────────────┬─────────────────────────────┤
+│ GLib 类型     │ 含义                        │
+├──────────────┼─────────────────────────────┤
+│ gboolean     │ 布尔值 (TRUE/FALSE)          │
+│ gint / guint │ 有符号/无符号整数             │
+│ gsize        │ 等同于 size_t               │
+│ gpointer     │ 通用指针 (void *)           │
+│ gchar *      │ 字符串                      │
+│ GArray       │ 动态数组                    │
+│ GHashTable   │ 哈希表                      │
+│ GBytes       │ 不可变字节序列               │
+│ GObject      │ 所有 GObject 类的基类        │
+│ GError       │ 错误信息结构体               │
+└──────────────┴─────────────────────────────┘
+</code></pre>
+
+<p>GObject 是 C 语言实现面向对象编程的一种约定。它不是语言特性，而是一套人为的规范。在 Frida 源码中你会看到这样的模式：</p>
+
+<pre><code class="language-c">
+// 声明一个 GObject 类型
+G_DECLARE_FINAL_TYPE (GumInterceptor, gum_interceptor,
+                      GUM, INTERCEPTOR, GObject)
+
+// 获取拦截器实例（单例模式）
+GumInterceptor *interceptor = gum_interceptor_obtain();
+
+// 调用方法（注意命名规范：模块_类名_方法名）
+gum_interceptor_attach(interceptor, address, listener, data, flags);
+
+// 释放引用
+g_object_unref(interceptor);
+</code></pre>
+
+<p>这里有一个重要的命名约定：GLib/GObject 世界中的函数命名遵循 <code>模块前缀_类名_方法名</code> 的模式。所以当你看到 <code>gum_interceptor_attach</code> 时，可以解读为&quot;gum 模块的 Interceptor 类的 attach 方法&quot;。</p>
+
+<h2 id="ch03-h5">3.2 Vala 语言：Frida 的血肉</h2>
+
+<p>Vala 可能是你第一次听说的语言，但在 Frida 中它扮演着至关重要的角色。frida-core 的大部分代码都是用 Vala 编写的。</p>
+
+<h3 id="ch03-h6">Vala 是什么</h3>
+
+<p>Vala 是 GNOME 社区开发的一种编程语言，语法类似 C#/Java，但它有一个独特的特点：<strong>Vala 编译器不生成机器码，而是先编译为 C 代码，再由 C 编译器编译为机器码。</strong></p>
+
+<pre><code>
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│ Vala     │    │ C 代码   │    │ 目标文件  │    │ 可执行   │
+│ 源码     │───&gt;│ (自动    │───&gt;│ (.o)     │───&gt;│ 文件     │
+│ (.vala)  │    │  生成)   │    │          │    │          │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘
+  valac 编译      gcc/clang       链接器
+</code></pre>
+
+<p>这意味着 Vala 代码最终会变成 C 代码，和 frida-gum 的 C 代码无缝对接。Frida 选择 Vala 的理由就很清楚了：既要高级语言的开发效率，又要和 C 底层完美融合。</p>
+
+<h3 id="ch03-h7">Vala 语法快速上手</h3>
+
+<p>来看一段 frida-core 中真实存在的代码模式：</p>
+
+<pre><code class="language-vala">
+// 命名空间
+namespace Frida {
+
+    // 类定义，sealed 表示不可继承
+    public sealed class DeviceManager : Object {
+
+        // 信号（类似事件）
+        public signal void added(Device device);
+        public signal void removed(Device device);
+
+        // 私有成员
+        private Gee.ArrayList&lt;Device&gt; devices = new Gee.ArrayList&lt;Device&gt;();
+
+        // 构造函数
+        public DeviceManager() {
+            service = new HostSessionService.with_default_backends();
+        }
+
+        // 异步方法（这是 Vala 的重要特性）
+        public async void close(Cancellable? cancellable = null) throws IOError {
+            yield stop_service(cancellable);
+        }
+
+        // 同步包装
+        public void close_sync(Cancellable? cancellable = null) throws IOError {
+            // ...
+        }
+    }
+}
+</code></pre>
+
+<p>对比一下，如果你会 C#、Java 或 TypeScript，Vala 的语法应该相当亲切。但有几个 Vala 特有的概念需要注意：</p>
+
+<p><strong>async/yield</strong>：Vala 内置了异步编程支持。在 frida-core 中，几乎所有的 I/O 操作都是异步的。<code>async</code> 和 <code>yield</code> 就像餐厅点餐：你发起一个异步操作，然后 <code>yield</code> 说&quot;做好了再叫我&quot;，线程就可以去处理别的事了。</p>
+
+<pre><code class="language-vala">
+public async Device get_device(string id) throws Error {
+    yield ensure_service_started();   // 等待服务启动
+    foreach (var device in devices) {
+        if (device.id == id)
+            return device;
+    }
+    throw new Error.INVALID_ARGUMENT(&quot;Device not found&quot;);
+}
+</code></pre>
+
+<p><strong>可空类型与属性</strong>：类型后面加 <code>?</code> 表示可以为 null（<code>Cancellable? cancellable = null</code>）。属性用 <code>{ get; construct; }</code> 语法声明，类似 C#。所有 Vala 类默认继承 GLib.Object，自动获得引用计数和信号机制。</p>
+
+<h3 id="ch03-h8">编译条件</h3>
+
+<p>frida-core 中大量使用了条件编译来处理跨平台差异：</p>
+
+<pre><code class="language-vala">
+private void add_local_backends() {
+#if WINDOWS
+    add_backend(new WindowsHostSessionBackend());
+#endif
+#if DARWIN
+    add_backend(new DarwinHostSessionBackend());
+#endif
+#if LINUX
+    add_backend(new LinuxHostSessionBackend());
+#endif
+}
+</code></pre>
+
+<p>这和 C 语言的 <code>#ifdef</code> 很像，根据编译目标平台选择不同的代码路径。</p>
+
+<h2 id="ch03-h9">3.3 JavaScript：Frida 的灵魂</h2>
+
+<p>当你写 Frida 脚本时，你用的就是 JavaScript。但这个 JavaScript 运行环境有点特殊，它不是浏览器，也不是 Node.js，而是 Frida 自己搭建的一个 JS 运行时。</p>
+
+<h3 id="ch03-h10">Frida 的 JavaScript API</h3>
+
+<p>Frida 在标准 JavaScript 的基础上提供了一系列全局对象和函数：</p>
+
+<pre><code class="language-javascript">
+// Interceptor：函数拦截
+Interceptor.attach(ptr(&#x27;0x12345678&#x27;), {
+    onEnter(args) {
+        // args[0], args[1] 是函数参数
+        console.log(&#x27;参数1:&#x27;, args[0].toInt32());
+    },
+    onLeave(retval) {
+        // retval 是返回值
+        console.log(&#x27;返回值:&#x27;, retval.toInt32());
+    }
+});
+
+// Module：模块（动态库）操作
+var base = Module.getBaseAddress(&#x27;libc.so&#x27;);
+var exports = Module.enumerateExports(&#x27;libc.so&#x27;);
+
+// Memory：内存读写
+var value = Memory.readU32(ptr(&#x27;0x12345678&#x27;));
+Memory.writeUtf8String(ptr(&#x27;0x12345678&#x27;), &#x27;hello&#x27;);
+
+// Process：进程信息
+var modules = Process.enumerateModules();
+var threads = Process.enumerateThreads();
+</code></pre>
+
+<h3 id="ch03-h11">JS 引擎：V8 与 QuickJS</h3>
+
+<p>Frida 支持两种 JavaScript 引擎，这也反映在源码结构中：</p>
+
+<pre><code>
+┌────────────────────────────────────────────────┐
+│              GumJS 桥接层                       │
+├───────────────────────┬────────────────────────┤
+│                       │                        │
+│   ┌───────────────┐   │   ┌────────────────┐   │
+│   │   V8 后端     │   │   │ QuickJS 后端   │   │
+│   │ gumv8*.cpp    │   │   │ gumquick*.c    │   │
+│   │               │   │   │                │   │
+│   │ 功能全面      │   │   │ 体积小巧       │   │
+│   │ 性能强大      │   │   │ 启动快速       │   │
+│   │ 体积较大      │   │   │ 资源占用少     │   │
+│   └───────────────┘   │   └────────────────┘   │
+│                       │                        │
+└───────────────────────┴────────────────────────┘
+</code></pre>
+
+<p>在源码中，每个 JS API 都有两套实现。比如 Interceptor 的 JS 绑定：</p>
+<ul>
+<li>- V8 版本：<code>gumv8interceptor.cpp</code></li>
+<li>- QuickJS 版本：<code>gumquickinterceptor.c</code></li>
+</ul>
+
+<p>它们提供完全相同的 JavaScript API，只是底层引擎不同。</p>
+
+<h3 id="ch03-h12">NativePointer 与 NativeFunction</h3>
+
+<p>在 Frida 的 JavaScript 世界中，有两个核心类型：</p>
+
+<pre><code class="language-javascript">
+// NativePointer：表示一个内存地址
+var addr = ptr(&#x27;0x7fff12345678&#x27;);
+var value = addr.readU32();        // 读取该地址的 32 位无符号整数
+
+// NativeFunction：把一个地址当作函数来调用
+var open = new NativeFunction(
+    Module.getExportByName(null, &#x27;open&#x27;),
+    &#x27;int&#x27;, [&#x27;pointer&#x27;, &#x27;int&#x27;]   // 返回值类型, 参数类型列表
+);
+var fd = open(Memory.allocUtf8String(&#x27;/etc/hosts&#x27;), 0);
+</code></pre>
+
+<p><code>NativePointer</code> 就像一个万能遥控器，指向内存中的任何位置。<code>NativeFunction</code> 则更进一步，它不仅知道地址在哪，还知道怎么调用那个地址上的函数。</p>
+
+<h2 id="ch03-h13">3.4 三种语言如何协作</h2>
+
+<p>现在让我们把三种语言串起来，看看当你执行一行 <code>Interceptor.attach(...)</code> 时，代码是如何跨越语言边界的：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────────┐
+│ 第1层：JavaScript（你写的脚本）                    │
+│                                                 │
+│   Interceptor.attach(target, callbacks)          │
+│         │                                       │
+│         v                                       │
+├─────────────────────────────────────────────────┤
+│ 第2层：GumJS 绑定（C/C++）                        │
+│                                                 │
+│   gumv8interceptor.cpp 或 gumquickinterceptor.c │
+│   解析 JS 参数，转换为 C 类型                     │
+│         │                                       │
+│         v                                       │
+├─────────────────────────────────────────────────┤
+│ 第3层：Gum 引擎（C）                              │
+│                                                 │
+│   guminterceptor.c                              │
+│   gum_interceptor_attach(self, addr, listener)  │
+│   修改目标函数的机器指令，建立蹦床跳转              │
+│         │                                       │
+│         v                                       │
+├─────────────────────────────────────────────────┤
+│ 第4层：平台相关代码（C）                           │
+│                                                 │
+│   修改内存页权限、写入跳转指令                     │
+│   处理缓存一致性（ARM 平台）                       │
+└─────────────────────────────────────────────────┘
+</code></pre>
+
+<p>在管理层面，Vala 代码负责更高级别的协调：你的 Python 脚本调用 frida-core（Vala）的 DeviceManager/Device/Session 来管理进程附加和脚本创建，frida-core 再把 JS 脚本送入目标进程的 Agent 中，Agent 加载 GumJS 运行时并执行你的脚本。</p>
+
+<p>所以三种语言各司其职：</p>
+
+<ul>
+<li>- <strong>C</strong>：干脏活累活，直接和 CPU 指令、内存打交道</li>
+<li>- <strong>Vala</strong>：做管理和协调，处理网络通信、进程管理等中间层逻辑</li>
+<li>- <strong>JavaScript</strong>：面向用户，提供灵活友好的脚本接口</li>
+</ul>
+
+<p>这就像一个公司：C 是一线工人，在车间里操作机器；Vala 是中层管理者，负责调度和协调；JavaScript 是面向客户的销售代表，提供友好的服务界面。</p>
+
+<h2 id="ch03-h14">3.5 阅读源码的实用技巧</h2>
+
+<p>知道了这三种语言的基本特征后，这里再给你几个阅读 Frida 源码时的实用技巧：</p>
+
+<ol>
+<li>1. <strong>看函数命名推断功能。</strong> <code>gum_interceptor_attach</code> 就是 GumInterceptor 的 attach 方法，命名规范让你几乎不需要注释就能理解代码意图。</li>
+<li>2. <strong>从头文件入手。</strong> 先看 <code>.h</code> 了解接口，再看 <code>.c</code> 了解实现。头文件是&quot;菜单&quot;，源文件是&quot;厨房&quot;。</li>
+<li>3. <strong>关注 <code>_init</code> 和 <code>_dispose</code>。</strong> GObject 的初始化和销毁函数会告诉你一个对象管理着哪些资源。</li>
+<li>4. <strong>用 <code>vapi</code> 文件作为索引。</strong> vapi 描述了 C 库的 Vala 绑定接口，是理解跨语言关系的好起点。</li>
+<li>5. <strong>善用搜索跨越语言边界。</strong> 从 JS 的 <code>Interceptor.attach</code> 搜索 <code>gumv8interceptor</code>，再搜索 <code>gum_interceptor_attach</code>，就能沿着调用链从顶到底。</li>
+</ol>
+
+<h2 id="ch03-h15">本章小结</h2>
+
+<ul>
+<li>- <strong>C 语言</strong> 用于 frida-gum 底层引擎，需要理解指针、结构体、函数指针和 GLib/GObject 类型系统</li>
+<li>- <strong>Vala 语言</strong> 用于 frida-core 框架层，语法类似 C#，编译时先转换为 C 代码，天然与 GObject 集成</li>
+<li>- <strong>JavaScript</strong> 是用户编写注入脚本的语言，Frida 提供了 V8 和 QuickJS 两种引擎的支持</li>
+<li>- 三种语言各有分工：C 负责底层操作，Vala 负责管理协调，JavaScript 负责用户接口</li>
+<li>- GumJS 绑定层（<code>gumv8<em>.cpp</code> 和 <code>gumquick</em>.c</code>）是连接 JavaScript 和 C 引擎的桥梁</li>
+<li>- 阅读源码时，善用命名规范、头文件和 vapi 文件来快速定位代码</li>
+</ul>
+
+<h2 id="ch03-h16">思考与讨论</h2>
+
+<ol>
+<li>1. Vala 编译为 C 再编译为机器码，这种&quot;两步编译&quot;的方式和 TypeScript 编译为 JavaScript 有什么相似之处？你觉得这种设计的核心优势是什么？</li>
+<li>2. Frida 同时支持 V8 和 QuickJS 两种 JS 引擎，在什么场景下你会选择 QuickJS 而非 V8？</li>
+<li>3. 如果你想追踪 <code>Interceptor.attach</code> 的完整执行路径，从 JavaScript 到最终修改目标函数的机器指令，你会怎么规划你的源码阅读路线？</li>
+</ol>
+
+<hr/>
+
+<p><em>本书由 [everettjf] 使用 Claude Code 分析源码编写 | 保留出处即可自由转载</em></p>
+
+    </article>
+    <nav class="chapter page-nav">
+      <a href="ch02.html" data-dir="prev"><span>&#8592;</span> <span>第2章 源码全景地图</span></a>
+      <span class="spacer"></span>
+      <a href="ch04.html" data-dir="next"><span>第4章 程序的大门——入口与启动流程</span> <span>&#8594;</span></a>
+    </nav>
+  </main>
+</div>
+
+<button class="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function toggleSidebar(){
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+function filterToc(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.toc-item').forEach(a=>{
+    a.classList.toggle('hidden',q&&!a.textContent.toLowerCase().includes(q));
+  });
+}
+window.addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  const pct=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100;
+  document.querySelector('.progress-bar .bar').style.width=pct+'%';
+  document.querySelector('.back-top').classList.toggle('show',h.scrollTop>400);
+},{passive:true});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowLeft'){ const a=document.querySelector('.page-nav a[data-dir=prev]'); if(a) a.click(); }
+  if(e.key==='ArrowRight'){ const a=document.querySelector('.page-nav a[data-dir=next]'); if(a) a.click(); }
+});
+
+const STORAGE_KEY = 'frida_read_progress';
+const CURRENT_CID = 'ch03';
+const ALL_CIDS = ["cover", "preface", "ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07", "ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14", "ch15", "ch16", "ch17", "ch18", "ch19", "ch20", "ch21", "ch22", "ch23", "ch24", "ch25", "ch26", "ch27", "ch28", "ch29", "ch30", "appendix-a", "appendix-b", "appendix-c", "about"];
+const TOTAL = ALL_CIDS.length;
+
+function getProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveProgress(p){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+function markRead(){
+  const p = getProgress();
+  if(!p[CURRENT_CID]){
+    p[CURRENT_CID] = new Date().toISOString();
+    saveProgress(p);
+  }
+  renderProgress();
+}
+function clearProgress(){
+  if(!confirm('确定要清除所有阅读记录吗？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderProgress();
+}
+function renderProgress(){
+  const p = getProgress();
+  const readCount = ALL_CIDS.filter(id => p[id]).length;
+  const pct = TOTAL ? Math.round(readCount / TOTAL * 100) : 0;
+  const fill = document.getElementById('readFill');
+  const text = document.getElementById('readText');
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = readCount + ' / ' + TOTAL + ' 章（' + pct + '%）';
+  document.querySelectorAll('.read-dot').forEach(dot => {
+    dot.classList.toggle('done', !!p[dot.dataset.cid]);
+  });
+  const lastEl = document.getElementById('lastRead');
+  if(lastEl){
+    const entries = Object.entries(p).sort((a,b) => b[1].localeCompare(a[1]));
+    if(entries.length > 0){
+      const [lastCid, lastTime] = entries[0];
+      const link = document.querySelector('.toc-item[data-cid="'+lastCid+'"]');
+      const title = link ? link.textContent.trim() : lastCid;
+      const d = new Date(lastTime);
+      const timeStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+        +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      lastEl.innerHTML = '上次阅读：<a href="'+lastCid+'.html">'+title+'</a><br><span style="font-size:.65rem">'+timeStr+'</span>';
+    } else {
+      lastEl.innerHTML = '<span style="color:var(--fg-dim)">还没有阅读记录</span>';
+    }
+  }
+  if(readCount === TOTAL && TOTAL > 0 && fill){
+    fill.style.background = 'linear-gradient(90deg,#4ade80,#22d3ee)';
+  }
+}
+let _marked = false;
+window.addEventListener('scroll', ()=>{
+  if(_marked) return;
+  const h = document.documentElement;
+  const scrollPct = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  if(scrollPct > 0.8){
+    _marked = true;
+    markRead();
+  }
+}, {passive:true});
+window.addEventListener('load', ()=>{
+  const h = document.documentElement;
+  if(h.scrollHeight <= h.clientHeight * 1.3){
+    setTimeout(()=>{ markRead(); }, 2000);
+  }
+  renderProgress();
+});
+</script>
+</body>
+</html>

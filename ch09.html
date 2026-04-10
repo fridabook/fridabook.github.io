@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第9章 Stalker——代码追踪引擎 - 解密 Frida</title>
+<style>
+:root {
+  --sidebar-w:300px; --bg:#101418; --bg-side:#141a1e; --fg:#d4dde0;
+  --fg-dim:#8899a6; --accent:#ff6b35; --accent2:#e8a317;
+  --code-bg:#181e24; --border:#283038; --hover:#1c2428; --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--fg);line-height:1.85;font-size:15px;
+}
+
+/* ── 布局 ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+  background:var(--bg-side);border-right:1px solid var(--border);
+  overflow-y:auto;z-index:100;display:flex;flex-direction:column;
+}
+.sidebar-header{padding:1.4rem 1.2rem .8rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-header h1{font-size:1.05rem;color:var(--accent);margin:0;font-weight:700}
+.sidebar-header p{font-size:.72rem;color:var(--fg-dim);margin-top:.25rem}
+.sidebar-search{padding:.7rem 1.2rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-search input{
+  width:100%;padding:.4rem .7rem;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--fg);font-size:.8rem;outline:none;
+}
+.sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search input::placeholder{color:var(--fg-dim)}
+.toc{padding:.5rem 0;overflow-y:auto;flex:1}
+.toc-group{
+  padding:.85rem 1.2rem .25rem;font-size:.68rem;font-weight:700;
+  color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;
+}
+.toc-item{
+  display:block;padding:.3rem 1.2rem .3rem 1.5rem;font-size:.8rem;
+  color:var(--fg-dim);text-decoration:none;border-left:3px solid transparent;
+  transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.toc-item:hover{color:var(--fg);background:var(--hover)}
+.toc-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--hover);font-weight:600}
+.toc-item.hidden{display:none}
+.toc-item .read-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:6px;flex-shrink:0;background:transparent;vertical-align:middle;
+}
+.toc-item .read-dot.done{background:#4ade80}
+
+/* ── 阅读进度面板 ── */
+.progress-panel{
+  border-top:1px solid var(--border);padding:.9rem 1.2rem;flex-shrink:0;
+}
+.progress-panel .progress-title{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:.72rem;color:var(--fg-dim);margin-bottom:.45rem;
+}
+.progress-panel .progress-title button{
+  background:none;border:none;color:var(--fg-dim);font-size:.68rem;
+  cursor:pointer;padding:0;text-decoration:underline;
+}
+.progress-panel .progress-title button:hover{color:var(--accent)}
+.progress-track{
+  width:100%;height:6px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+}
+.progress-track .progress-fill{
+  height:100%;border-radius:3px;transition:width .4s;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-panel .progress-text{
+  font-size:.7rem;color:var(--fg-dim);margin-top:.35rem;text-align:center;
+}
+.progress-panel .last-read{
+  font-size:.68rem;color:var(--fg-dim);margin-top:.5rem;padding-top:.45rem;
+  border-top:1px solid var(--border);
+}
+.progress-panel .last-read a{
+  color:var(--accent);font-size:.72rem;
+}
+
+/* ── 内容 ── */
+.content{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.chapter{max-width:820px;margin:0 auto;padding:2.5rem 3rem 3rem}
+
+/* ── 排版 ── */
+h1{font-size:1.8rem;color:var(--accent);margin:1.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent);line-height:1.3}
+h2{font-size:1.3rem;color:#e8a317;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.08rem;color:#f0c050;margin:1.5rem 0 .5rem}
+h4{font-size:1rem;color:#b8c8d0;margin:1.2rem 0 .4rem}
+p{margin:.7rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:#fff;font-weight:600}
+em{color:#a0b4be}
+
+/* ── 代码 ── */
+code{
+  background:var(--code-bg);padding:.14em .42em;border-radius:4px;
+  font-size:.87em;font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;color:#e0c080;
+}
+pre{
+  background:var(--code-bg);padding:1rem 1.2rem;border-radius:var(--radius);
+  overflow-x:auto;margin:1rem 0;border:1px solid var(--border);line-height:1.55;
+}
+pre code{background:none;padding:0;color:var(--fg);font-size:.84em}
+
+/* ── 表格 ── */
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9em}
+th,td{border:1px solid var(--border);padding:.45rem .75rem;text-align:left}
+th{background:var(--code-bg);color:var(--accent);font-weight:600;font-size:.86em}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── 引用 / 列表 / 其他 ── */
+blockquote{border-left:4px solid var(--accent2);padding:.4rem 1rem;margin:1rem 0;color:var(--fg-dim);background:rgba(232,163,23,.08);border-radius:0 var(--radius) var(--radius) 0}
+blockquote p{margin:.25rem 0}
+ul,ol{padding-left:1.5rem;margin:.5rem 0}
+li{margin:.25rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+img{max-width:100%;border-radius:var(--radius)}
+
+/* ── 下载按钮 ── */
+.download-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0}
+.dl-btn{
+  display:inline-block;padding:.65rem 1.8rem;border-radius:var(--radius);
+  font-size:.95rem;font-weight:600;text-decoration:none;transition:all .2s;
+  border:2px solid var(--border);
+}
+.dl-btn:hover{text-decoration:none}
+.dl-start{background:var(--accent);color:#000;border-color:var(--accent)}
+.dl-start:hover{background:#e85a2a;border-color:#e85a2a;color:#000}
+.dl-pdf{background:transparent;color:var(--fg);border-color:var(--accent)}
+.dl-pdf:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.dl-epub{background:transparent;color:var(--fg);border-color:var(--border)}
+.dl-epub:hover{border-color:var(--accent);color:var(--accent)}
+.version-info{font-size:.8rem;color:var(--fg-dim)}
+
+/* ── 翻页导航 ── */
+.page-nav{
+  display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+}
+.page-nav a{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.55rem 1.1rem;border-radius:var(--radius);
+  background:var(--code-bg);border:1px solid var(--border);
+  color:var(--fg);font-size:.85rem;text-decoration:none;transition:all .2s;
+  max-width:45%;
+}
+.page-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.page-nav a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-nav .spacer{flex:1}
+
+/* ── 进度条 ── */
+.progress-bar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:3px;z-index:110}
+.progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .1s}
+
+/* ── 回到顶部 ── */
+.back-top{
+  position:fixed;bottom:2rem;right:2rem;width:2.4rem;height:2.4rem;border-radius:50%;
+  background:var(--accent2);color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;transition:opacity .3s;display:flex;align-items:center;justify-content:center;z-index:80;
+}
+.back-top.show{opacity:.8}
+.back-top:hover{opacity:1}
+
+/* ── 移动端 ── */
+.menu-btn{
+  display:none;position:fixed;top:.7rem;left:.7rem;z-index:200;
+  background:var(--bg-side);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--accent);font-size:1.2rem;width:2.4rem;height:2.4rem;cursor:pointer;
+  align-items:center;justify-content:center;
+}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+@media(max-width:900px){
+  :root{--sidebar-w:270px}
+  .chapter{padding:2rem 1.5rem 2.5rem}
+}
+@media(max-width:700px){
+  .sidebar{transform:translateX(-100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .menu-btn{display:flex}
+  .overlay.show{display:block}
+  .chapter{padding:3.2rem 1.1rem 2.5rem}
+  .progress-bar{left:0}
+  h1{font-size:1.45rem} h2{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<div class="progress-bar"><div class="bar"></div></div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1><a href="/" style="color:inherit;text-decoration:none">解密 Frida</a></h1>
+      <p>动态插桩框架源码之旅</p>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" placeholder="搜索章节..." oninput="filterToc(this.value)">
+    </div>
+    <div class="toc"><a class="toc-item" href="cover.html" data-cid="cover"><span class="read-dot" data-cid="cover"></span>封面</a>
+<a class="toc-item" href="preface.html" data-cid="preface"><span class="read-dot" data-cid="preface"></span>前言</a>
+<div class="toc-group">第一部分 起步篇</div>
+<a class="toc-item" href="ch01.html" data-cid="ch01"><span class="read-dot" data-cid="ch01"></span>第1章 走进 Frida 的世界</a>
+<a class="toc-item" href="ch02.html" data-cid="ch02"><span class="read-dot" data-cid="ch02"></span>第2章 源码全景地图</a>
+<a class="toc-item" href="ch03.html" data-cid="ch03"><span class="read-dot" data-cid="ch03"></span>第3章 语言基础速览：C、Vala 与 JavaScript</a>
+<div class="toc-group">第二部分 核心架构篇</div>
+<a class="toc-item" href="ch04.html" data-cid="ch04"><span class="read-dot" data-cid="ch04"></span>第4章 程序的大门——入口与启动流程</a>
+<a class="toc-item" href="ch05.html" data-cid="ch05"><span class="read-dot" data-cid="ch05"></span>第5章 Gum：插桩引擎的心脏</a>
+<a class="toc-item" href="ch06.html" data-cid="ch06"><span class="read-dot" data-cid="ch06"></span>第6章 核心数据结构与接口定义</a>
+<a class="toc-item" href="ch07.html" data-cid="ch07"><span class="read-dot" data-cid="ch07"></span>第7章 构建系统——Meson 与交叉编译</a>
+<div class="toc-group">第三部分 插桩引擎篇</div>
+<a class="toc-item" href="ch08.html" data-cid="ch08"><span class="read-dot" data-cid="ch08"></span>第8章 Interceptor——函数钩子的魔法</a>
+<a class="toc-item active" href="ch09.html" data-cid="ch09"><span class="read-dot" data-cid="ch09"></span>第9章 Stalker——代码追踪引擎</a>
+<a class="toc-item" href="ch10.html" data-cid="ch10"><span class="read-dot" data-cid="ch10"></span>第10章 代码生成器——跨架构的机器语言</a>
+<a class="toc-item" href="ch11.html" data-cid="ch11"><span class="read-dot" data-cid="ch11"></span>第11章 Relocator——代码搬迁的艺术</a>
+<div class="toc-group">第四部分 注入与代理篇</div>
+<a class="toc-item" href="ch12.html" data-cid="ch12"><span class="read-dot" data-cid="ch12"></span>第12章 进程注入——打入目标的第一步</a>
+<a class="toc-item" href="ch13.html" data-cid="ch13"><span class="read-dot" data-cid="ch13"></span>第13章 Agent 生命周期——注入后的世界</a>
+<a class="toc-item" href="ch14.html" data-cid="ch14"><span class="read-dot" data-cid="ch14"></span>第14章 脚本引擎——JavaScript 遇见原生代码</a>
+<a class="toc-item" href="ch15.html" data-cid="ch15"><span class="read-dot" data-cid="ch15"></span>第15章 Gadget 模式——无需注入的插桩</a>
+<div class="toc-group">第五部分 平台子系统篇</div>
+<a class="toc-item" href="ch16.html" data-cid="ch16"><span class="read-dot" data-cid="ch16"></span>第16章 Linux 后端——ptrace 与 ELF 的世界</a>
+<a class="toc-item" href="ch17.html" data-cid="ch17"><span class="read-dot" data-cid="ch17"></span>第17章 Darwin 后端——Mach 端口与 XPC</a>
+<a class="toc-item" href="ch18.html" data-cid="ch18"><span class="read-dot" data-cid="ch18"></span>第18章 Windows 后端——远程线程与调试符号</a>
+<a class="toc-item" href="ch19.html" data-cid="ch19"><span class="read-dot" data-cid="ch19"></span>第19章 移动平台——Android 与 iOS 的特殊挑战</a>
+<div class="toc-group">第六部分 通信与协议篇</div>
+<a class="toc-item" href="ch20.html" data-cid="ch20"><span class="read-dot" data-cid="ch20"></span>第20章 DBus 协议——通信的骨架</a>
+<a class="toc-item" href="ch21.html" data-cid="ch21"><span class="read-dot" data-cid="ch21"></span>第21章 控制服务——网络上的 Frida</a>
+<a class="toc-item" href="ch22.html" data-cid="ch22"><span class="read-dot" data-cid="ch22"></span>第22章 消息系统——脚本与宿主的对话</a>
+<div class="toc-group">第七部分 绑定与工具篇</div>
+<a class="toc-item" href="ch23.html" data-cid="ch23"><span class="read-dot" data-cid="ch23"></span>第23章 Python 绑定——最受欢迎的接口</a>
+<a class="toc-item" href="ch24.html" data-cid="ch24"><span class="read-dot" data-cid="ch24"></span>第24章 Node.js 绑定与其他语言</a>
+<a class="toc-item" href="ch25.html" data-cid="ch25"><span class="read-dot" data-cid="ch25"></span>第25章 命令行工具——frida-tools 全家桶</a>
+<div class="toc-group">第八部分 高级话题篇</div>
+<a class="toc-item" href="ch26.html" data-cid="ch26"><span class="read-dot" data-cid="ch26"></span>第26章 内存操作——扫描、监控与读写</a>
+<a class="toc-item" href="ch27.html" data-cid="ch27"><span class="read-dot" data-cid="ch27"></span>第27章 跨平台设计——一套代码，多个世界</a>
+<a class="toc-item" href="ch28.html" data-cid="ch28"><span class="read-dot" data-cid="ch28"></span>第28章 性能优化——速度的追求</a>
+<div class="toc-group">第九部分 总结篇</div>
+<a class="toc-item" href="ch29.html" data-cid="ch29"><span class="read-dot" data-cid="ch29"></span>第29章 架构之美——设计模式总结</a>
+<a class="toc-item" href="ch30.html" data-cid="ch30"><span class="read-dot" data-cid="ch30"></span>第30章 你的下一步——从读者到贡献者</a>
+<div class="toc-group">附录</div>
+<a class="toc-item" href="appendix-a.html" data-cid="appendix-a"><span class="read-dot" data-cid="appendix-a"></span>附录 A 术语表</a>
+<a class="toc-item" href="appendix-b.html" data-cid="appendix-b"><span class="read-dot" data-cid="appendix-b"></span>附录 B 源码关键文件索引</a>
+<a class="toc-item" href="appendix-c.html" data-cid="appendix-c"><span class="read-dot" data-cid="appendix-c"></span>附录 C 全书知识地图</a>
+<a class="toc-item" href="about.html" data-cid="about"><span class="read-dot" data-cid="about"></span>关于本书</a></div>
+    <div class="progress-panel">
+      <div class="progress-title">
+        <span>阅读进度</span>
+        <button onclick="clearProgress()">清除记录</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="readFill"></div></div>
+      <div class="progress-text" id="readText">0 / 0 章</div>
+      <div class="last-read" id="lastRead"></div>
+    </div>
+  </nav>
+
+  <main class="content">
+    <article class="chapter">
+<h1 id="ch09-h1">第9章：Stalker -- 代码追踪引擎</h1>
+
+<blockquote><p>如果 Interceptor 是在路口设了一个检查站，那 Stalker 就是给目标车辆装了一个 GPS 追踪器。它不只是在某几个点拦截你，而是追踪你走过的每一条路、每一个转弯。这到底是怎么做到的？</p></blockquote>
+
+<h2 id="ch09-h2">9.1 什么是动态二进制插桩？</h2>
+
+<p>我们先区分两个概念：</p>
+
+<ul>
+<li>- <strong>静态二进制插桩</strong>：在程序运行之前，修改它的可执行文件，插入额外的代码。好比你在印刷之前修改了一本书的内容。</li>
+<li>- <strong>动态二进制插桩</strong>（DBI）：在程序运行时，实时地转换它即将执行的代码。好比你在别人读书的时候，在他翻到下一页之前，偷偷把那一页换成了你修改过的版本。</li>
+</ul>
+
+<p>Stalker 就是 Frida 的 DBI 引擎。它能做到：</p>
+
+<ul>
+<li>- 追踪目标线程执行的每一条指令</li>
+<li>- 记录所有函数调用和返回</li>
+<li>- 在任意指令处插入自定义代码</li>
+<li>- 实时转换正在执行的机器码</li>
+</ul>
+
+<h2 id="ch09-h3">9.2 Stalker vs Interceptor：什么时候用哪个？</h2>
+
+<pre><code>
+┌──────────────────┬────────────────────────┬─────────────────────────┐
+│                  │     Interceptor        │       Stalker           │
+├──────────────────┼────────────────────────┼─────────────────────────┤
+│ 工作方式         │ 修改函数入口           │ 实时重编译代码          │
+│ 粒度             │ 函数级别               │ 指令级别                │
+│ 性能开销         │ 极小（只在入口处）     │ 较大（每条指令都处理）  │
+│ 适用场景         │ Hook 特定函数          │ 代码覆盖率/调用追踪     │
+│ 对原始代码的影响 │ 只修改函数开头几字节   │ 创建代码的完整副本      │
+│ 同时追踪的范围   │ 你指定的函数           │ 整个线程的执行流        │
+└──────────────────┴────────────────────────┴─────────────────────────┘
+</code></pre>
+
+<p>简单说：如果你只想监控几个函数的参数和返回值，用 Interceptor。如果你想知道一个线程执行了哪些代码路径，用 Stalker。</p>
+
+<h2 id="ch09-h4">9.3 Stalker 的核心 API</h2>
+
+<p>让我们看看 <code>gumstalker.h</code> 中的关键接口：</p>
+
+<pre><code class="language-c">
+// 创建 Stalker 实例
+GumStalker * gum_stalker_new (void);
+
+// 追踪当前线程
+void gum_stalker_follow_me (GumStalker * self,
+    GumStalkerTransformer * transformer,
+    GumEventSink * sink);
+
+// 停止追踪当前线程
+void gum_stalker_unfollow_me (GumStalker * self);
+
+// 追踪指定线程
+void gum_stalker_follow (GumStalker * self,
+    GumThreadId thread_id,
+    GumStalkerTransformer * transformer,
+    GumEventSink * sink);
+
+// 停止追踪指定线程
+void gum_stalker_unfollow (GumStalker * self,
+    GumThreadId thread_id);
+</code></pre>
+
+<p>两个关键参数：</p>
+
+<ul>
+<li>- <strong>GumStalkerTransformer</strong>: 代码转换器，决定如何修改每个基本块</li>
+<li>- <strong>GumEventSink</strong>: 事件接收器，接收追踪过程中产生的事件</li>
+</ul>
+
+<h2 id="ch09-h5">9.4 基本块编译模型</h2>
+
+<p>Stalker 的核心思想是：不修改原始代码，而是创建代码的转换副本来执行。</p>
+
+<p>什么是基本块（Basic Block）？就是一段没有分支的连续指令，从第一条执行到最后一条，中间不会跳走。比如：</p>
+
+<pre><code>
+基本块 A:               基本块 B:
+  mov rax, [rdi]          cmp rax, 0
+  add rax, 1              je block_C
+  mov [rdi], rax          call some_func
+  jmp block_B             jmp block_D
+</code></pre>
+
+<p>Stalker 的工作流程：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────────────────┐
+│                    Stalker 执行流程                      │
+│                                                         │
+│  原始代码                         转换后的代码           │
+│  ┌───────────┐                   ┌───────────────────┐  │
+│  │ 基本块 A  │ ──编译转换──&gt;     │ 基本块 A&#x27; (副本)  │  │
+│  │           │                   │ + 插桩代码         │  │
+│  └─────┬─────┘                   └─────┬─────────────┘  │
+│        │                               │                │
+│        v                               v                │
+│  ┌───────────┐                   ┌───────────────────┐  │
+│  │ 基本块 B  │ ──编译转换──&gt;     │ 基本块 B&#x27; (副本)  │  │
+│  │           │                   │ + 插桩代码         │  │
+│  └───────────┘                   └───────────────────┘  │
+│                                                         │
+│  注意：线程实际执行的是右边的转换后代码！                │
+└─────────────────────────────────────────────────────────┘
+</code></pre>
+
+<p>每当线程准备执行一个新的基本块时，Stalker 会：</p>
+
+<ol>
+<li>1. 检查这个基本块是否已经被编译过</li>
+<li>2. 如果没有，用 Transformer 编译它（读取原始指令，生成转换后的版本）</li>
+<li>3. 让线程跳转到编译后的代码去执行</li>
+<li>4. 当编译后的代码执行完毕（遇到跳转），重复上述过程</li>
+</ol>
+
+<p>这就像一个实时翻译员：你说一句话，他翻译一句话给对方听。对方从来不直接听到你说的原话，只听到翻译后的版本。</p>
+
+<h2 id="ch09-h6">9.5 StalkerTransformer：你的代码转换器</h2>
+
+<p>Transformer 是你控制 Stalker 行为的主要接口：</p>
+
+<pre><code class="language-c">
+// 创建默认的 Transformer（原样复制所有指令）
+GumStalkerTransformer * gum_stalker_transformer_make_default (void);
+
+// 创建自定义 Transformer
+GumStalkerTransformer * gum_stalker_transformer_make_from_callback (
+    GumStalkerTransformerCallback callback,
+    gpointer data,
+    GDestroyNotify data_destroy);
+</code></pre>
+
+<p>在回调中，你通过 <code>GumStalkerIterator</code> 遍历基本块中的每条指令：</p>
+
+<pre><code class="language-c">
+void my_transformer (GumStalkerIterator * iterator,
+                     GumStalkerOutput * output,
+                     gpointer user_data)
+{
+  const cs_insn * insn;
+
+  // 遍历原始基本块中的每条指令
+  while (gum_stalker_iterator_next (iterator, &amp;insn))
+  {
+    // 你可以检查指令，决定怎么处理
+
+    if (insn-&gt;id == X86_INS_CALL)
+    {
+      // 在 call 指令前插入一个回调
+      gum_stalker_iterator_put_callout (iterator,
+          my_callout, NULL, NULL);
+    }
+
+    // 保留原始指令（复制到输出）
+    gum_stalker_iterator_keep (iterator);
+  }
+}
+</code></pre>
+
+<p><code>keep</code> 是关键操作：它把当前指令复制到转换后的代码中。如果你不调用 <code>keep</code>，这条指令就会被&quot;吃掉&quot;。你也可以用 <code>put_callout</code> 在任意位置插入 C 函数回调。</p>
+
+<h2 id="ch09-h7">9.6 EventSink：事件收集器</h2>
+
+<p>EventSink 负责接收 Stalker 产生的各种事件。先看事件类型：</p>
+
+<pre><code class="language-c">
+enum _GumEventType
+{
+  GUM_NOTHING  = 0,
+  GUM_CALL     = 1 &lt;&lt; 0,   // 函数调用
+  GUM_RET      = 1 &lt;&lt; 1,   // 函数返回
+  GUM_EXEC     = 1 &lt;&lt; 2,   // 每条指令执行
+  GUM_BLOCK    = 1 &lt;&lt; 3,   // 基本块执行
+  GUM_COMPILE  = 1 &lt;&lt; 4,   // 基本块编译
+};
+</code></pre>
+
+<p>不同事件携带不同信息：</p>
+
+<pre><code class="language-c">
+struct _GumCallEvent {
+  GumEventType type;
+  gpointer location;    // call 指令的地址
+  gpointer target;      // 被调用函数的地址
+  gint depth;           // 调用深度
+};
+
+struct _GumExecEvent {
+  GumEventType type;
+  gpointer location;    // 当前执行的指令地址
+};
+
+struct _GumBlockEvent {
+  GumEventType type;
+  gpointer start;       // 基本块起始地址
+  gpointer end;         // 基本块结束地址
+};
+</code></pre>
+
+<p>EventSink 接口的设计很优雅：</p>
+
+<pre><code class="language-c">
+struct _GumEventSinkInterface
+{
+  GumEventType (* query_mask) (GumEventSink * self);  // 你关心哪些事件？
+  void (* start) (GumEventSink * self);               // 追踪开始
+  void (* process) (GumEventSink * self,               // 处理每个事件
+      const GumEvent * event, GumCpuContext * cpu_context);
+  void (* flush) (GumEventSink * self);               // 刷新缓冲区
+  void (* stop) (GumEventSink * self);                // 追踪结束
+};
+</code></pre>
+
+<p><code>query_mask</code> 非常重要：如果你只关心 <code>GUM_CALL</code>，Stalker 就不会为每条指令都生成事件上报代码，大幅减少性能开销。</p>
+
+<h2 id="ch09-h8">9.7 StalkerWriter：跨架构的代码输出</h2>
+
+<p>Stalker 需要在不同架构上生成代码，因此使用了一个联合体来统一接口：</p>
+
+<pre><code class="language-c">
+union _GumStalkerWriter
+{
+  gpointer instance;
+  GumX86Writer * x86;
+  GumArmWriter * arm;
+  GumThumbWriter * thumb;
+  GumArm64Writer * arm64;
+  GumMipsWriter * mips;
+};
+
+struct _GumStalkerOutput
+{
+  GumStalkerWriter writer;
+  GumInstructionEncoding encoding;
+};
+</code></pre>
+
+<p>这意味着 Stalker 在 x86 平台上用 <code>GumX86Writer</code> 生成代码，在 ARM64 平台上用 <code>GumArm64Writer</code>，但对上层提供统一的抽象。</p>
+
+<h2 id="ch09-h9">9.8 信任阈值与代码缓存</h2>
+
+<p>Stalker 编译过的基本块会被缓存起来复用，但问题是：怎么知道缓存的代码还是有效的？</p>
+
+<pre><code class="language-c">
+// 获取/设置信任阈值
+gint gum_stalker_get_trust_threshold (GumStalker * self);
+void gum_stalker_set_trust_threshold (GumStalker * self,
+    gint trust_threshold);
+</code></pre>
+
+<p>信任阈值（trust threshold）控制缓存策略：</p>
+
+<ul>
+<li>- <strong>-1</strong>: 永远不信任缓存，每次都重新编译（最安全但最慢）</li>
+<li>- <strong>0</strong>: 信任缓存，但不计数（默认值，适合大多数场景）</li>
+<li>- <strong>N &gt; 0</strong>: 基本块被执行 N 次后，才完全信任它（折中方案）</li>
+</ul>
+
+<p>为什么需要这个？因为有些程序会动态修改自己的代码（自修改代码）。如果 Stalker 总是用缓存的旧版本，就会执行错误的代码。</p>
+
+<h2 id="ch09-h10">9.9 Backpatching 优化</h2>
+
+<p>Stalker 的一个重要优化是 backpatching（回填修补）。</p>
+
+<p>考虑这个场景：基本块 A 的末尾跳转到基本块 B。第一次执行时，Stalker 必须从 A&#x27; 返回到 Stalker 引擎，查找或编译 B，再跳到 B&#x27;。但如果 B 已经编译好了，后续执行时可以直接从 A&#x27; 跳到 B&#x27;，跳过 Stalker 引擎这个中间环节。</p>
+
+<pre><code>
+首次执行:
+  A&#x27;末尾 ──&gt; Stalker引擎 ──&gt; 查找/编译B ──&gt; B&#x27;
+
+Backpatch 后:
+  A&#x27;末尾 ──────────────────────────────────&gt; B&#x27;
+</code></pre>
+
+<p>这就像你第一次去一个地方需要查地图，但走过一次后就记住路了，下次直接走。</p>
+
+<p>Stalker 通过 Observer 接口通知外部关于 backpatch 的操作：</p>
+
+<pre><code class="language-c">
+struct _GumStalkerObserverInterface
+{
+  GumStalkerNotifyBackpatchFunc notify_backpatch;
+  // ... 各种计数器 ...
+  GumStalkerIncrementFunc increment_call_imm;
+  GumStalkerIncrementFunc increment_call_reg;
+  GumStalkerIncrementFunc increment_jmp_imm;
+  GumStalkerIncrementFunc increment_ret;
+  // ...
+};
+</code></pre>
+
+<h2 id="ch09-h11">9.10 排除区域</h2>
+
+<p>有些代码你不希望 Stalker 去转换（比如 Frida 自己的代码），可以用 exclude 排除：</p>
+
+<pre><code class="language-c">
+void gum_stalker_exclude (GumStalker * self,
+    const GumMemoryRange * range);
+</code></pre>
+
+<p>当执行流进入排除区域时，Stalker 会让它直接原生执行，离开后再恢复追踪。</p>
+
+<h2 id="ch09-h12">9.11 其他实用功能</h2>
+
+<pre><code class="language-c">
+// 添加调用探针（当特定地址被 call 时触发）
+GumProbeId gum_stalker_add_call_probe (GumStalker * self,
+    gpointer target_address, GumCallProbeCallback callback,
+    gpointer data, GDestroyNotify notify);
+
+// 在指定线程上执行函数
+gboolean gum_stalker_run_on_thread (GumStalker * self,
+    GumThreadId thread_id, GumStalkerRunOnThreadFunc func,
+    gpointer data, GDestroyNotify data_destroy);
+
+// 使指定地址的缓存失效（代码被修改后需要调用）
+void gum_stalker_invalidate (GumStalker * self,
+    gconstpointer address);
+
+// 预编译指定地址的代码
+void gum_stalker_prefetch (GumStalker * self,
+    gconstpointer address, gint recycle_count);
+</code></pre>
+
+<p><code>run_on_thread</code> 特别有趣：它允许你在目标线程的上下文中执行一段代码。这对于需要在特定线程上操作的场景非常有用。</p>
+
+<h2 id="ch09-h13">9.12 Stalker 的完整工作流程</h2>
+
+<p>把所有的概念串起来：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────────────┐
+│                Stalker 完整流程                      │
+│                                                     │
+│  1. follow_me() / follow(thread_id)                 │
+│     │                                               │
+│  2. 获取目标线程当前的 PC（程序计数器）              │
+│     │                                               │
+│  3. 查找该 PC 对应的基本块是否已编译                 │
+│     │                                               │
+│     ├─ 是 ──&gt; 直接执行编译后的代码                   │
+│     │                                               │
+│     └─ 否 ──&gt; 4. 编译基本块                         │
+│                  │                                   │
+│                  ├─ 用 Capstone 反汇编原始指令        │
+│                  ├─ 调用 Transformer 处理每条指令     │
+│                  ├─ 用 Writer 生成转换后的代码        │
+│                  ├─ 插入事件上报代码（根据 EventSink │
+│                  │  的 query_mask）                   │
+│                  └─ 缓存编译结果                     │
+│                                                     │
+│  5. 执行编译后的代码                                 │
+│     │                                               │
+│  6. 遇到跳转/调用/返回时                             │
+│     │                                               │
+│     ├─ 产生对应事件发送给 EventSink                  │
+│     └─ 回到第3步处理下一个基本块                     │
+│                                                     │
+│  7. unfollow_me() / unfollow(thread_id) 停止追踪     │
+└─────────────────────────────────────────────────────┘
+</code></pre>
+
+<h2 id="ch09-h14">9.13 本章小结</h2>
+
+<ul>
+<li>- Stalker 是 Frida 的动态二进制插桩引擎，能追踪线程执行的每一条指令</li>
+<li>- 核心原理是实时编译：将原始代码的基本块转换成插桩后的副本来执行</li>
+<li>- Transformer 让你控制如何转换每条指令，EventSink 让你收集执行事件</li>
+<li>- Backpatching 优化减少了反复查找编译代码的开销</li>
+<li>- 信任阈值控制代码缓存的策略，平衡安全性和性能</li>
+<li>- 与 Interceptor 相比，Stalker 粒度更细但开销更大</li>
+</ul>
+
+<h2 id="ch09-h15">讨论问题</h2>
+
+<ol>
+<li>1. Stalker 为什么选择&quot;复制并转换代码&quot;的方案，而不是像 Interceptor 那样在原地修改代码？</li>
+</ol>
+
+<ol>
+<li>2. 如果目标程序存在自修改代码（比如解密 shellcode 后执行），Stalker 如何处理？trust_threshold 在这种场景下应该怎么设置？</li>
+</ol>
+
+<ol>
+<li>3. 在 JavaScript 层面使用 <code>Stalker.follow()</code> 时，开启 <code>GUM_EXEC</code> 事件（追踪每条指令）和只开启 <code>GUM_CALL</code> 事件，性能差异为什么会很大？从源码层面解释原因。</li>
+</ol>
+
+<hr/>
+
+<p><em>本书由 [everettjf] 使用 Claude Code 分析源码编写 | 保留出处即可自由转载</em></p>
+
+    </article>
+    <nav class="chapter page-nav">
+      <a href="ch08.html" data-dir="prev"><span>&#8592;</span> <span>第8章 Interceptor——函数钩子的魔法</span></a>
+      <span class="spacer"></span>
+      <a href="ch10.html" data-dir="next"><span>第10章 代码生成器——跨架构的机器语言</span> <span>&#8594;</span></a>
+    </nav>
+  </main>
+</div>
+
+<button class="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function toggleSidebar(){
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+function filterToc(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.toc-item').forEach(a=>{
+    a.classList.toggle('hidden',q&&!a.textContent.toLowerCase().includes(q));
+  });
+}
+window.addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  const pct=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100;
+  document.querySelector('.progress-bar .bar').style.width=pct+'%';
+  document.querySelector('.back-top').classList.toggle('show',h.scrollTop>400);
+},{passive:true});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowLeft'){ const a=document.querySelector('.page-nav a[data-dir=prev]'); if(a) a.click(); }
+  if(e.key==='ArrowRight'){ const a=document.querySelector('.page-nav a[data-dir=next]'); if(a) a.click(); }
+});
+
+const STORAGE_KEY = 'frida_read_progress';
+const CURRENT_CID = 'ch09';
+const ALL_CIDS = ["cover", "preface", "ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07", "ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14", "ch15", "ch16", "ch17", "ch18", "ch19", "ch20", "ch21", "ch22", "ch23", "ch24", "ch25", "ch26", "ch27", "ch28", "ch29", "ch30", "appendix-a", "appendix-b", "appendix-c", "about"];
+const TOTAL = ALL_CIDS.length;
+
+function getProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveProgress(p){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+function markRead(){
+  const p = getProgress();
+  if(!p[CURRENT_CID]){
+    p[CURRENT_CID] = new Date().toISOString();
+    saveProgress(p);
+  }
+  renderProgress();
+}
+function clearProgress(){
+  if(!confirm('确定要清除所有阅读记录吗？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderProgress();
+}
+function renderProgress(){
+  const p = getProgress();
+  const readCount = ALL_CIDS.filter(id => p[id]).length;
+  const pct = TOTAL ? Math.round(readCount / TOTAL * 100) : 0;
+  const fill = document.getElementById('readFill');
+  const text = document.getElementById('readText');
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = readCount + ' / ' + TOTAL + ' 章（' + pct + '%）';
+  document.querySelectorAll('.read-dot').forEach(dot => {
+    dot.classList.toggle('done', !!p[dot.dataset.cid]);
+  });
+  const lastEl = document.getElementById('lastRead');
+  if(lastEl){
+    const entries = Object.entries(p).sort((a,b) => b[1].localeCompare(a[1]));
+    if(entries.length > 0){
+      const [lastCid, lastTime] = entries[0];
+      const link = document.querySelector('.toc-item[data-cid="'+lastCid+'"]');
+      const title = link ? link.textContent.trim() : lastCid;
+      const d = new Date(lastTime);
+      const timeStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+        +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      lastEl.innerHTML = '上次阅读：<a href="'+lastCid+'.html">'+title+'</a><br><span style="font-size:.65rem">'+timeStr+'</span>';
+    } else {
+      lastEl.innerHTML = '<span style="color:var(--fg-dim)">还没有阅读记录</span>';
+    }
+  }
+  if(readCount === TOTAL && TOTAL > 0 && fill){
+    fill.style.background = 'linear-gradient(90deg,#4ade80,#22d3ee)';
+  }
+}
+let _marked = false;
+window.addEventListener('scroll', ()=>{
+  if(_marked) return;
+  const h = document.documentElement;
+  const scrollPct = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  if(scrollPct > 0.8){
+    _marked = true;
+    markRead();
+  }
+}, {passive:true});
+window.addEventListener('load', ()=>{
+  const h = document.documentElement;
+  if(h.scrollHeight <= h.clientHeight * 1.3){
+    setTimeout(()=>{ markRead(); }, 2000);
+  }
+  renderProgress();
+});
+</script>
+</body>
+</html>

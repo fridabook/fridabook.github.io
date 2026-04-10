@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第11章 Relocator——代码搬迁的艺术 - 解密 Frida</title>
+<style>
+:root {
+  --sidebar-w:300px; --bg:#101418; --bg-side:#141a1e; --fg:#d4dde0;
+  --fg-dim:#8899a6; --accent:#ff6b35; --accent2:#e8a317;
+  --code-bg:#181e24; --border:#283038; --hover:#1c2428; --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--fg);line-height:1.85;font-size:15px;
+}
+
+/* ── 布局 ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+  background:var(--bg-side);border-right:1px solid var(--border);
+  overflow-y:auto;z-index:100;display:flex;flex-direction:column;
+}
+.sidebar-header{padding:1.4rem 1.2rem .8rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-header h1{font-size:1.05rem;color:var(--accent);margin:0;font-weight:700}
+.sidebar-header p{font-size:.72rem;color:var(--fg-dim);margin-top:.25rem}
+.sidebar-search{padding:.7rem 1.2rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-search input{
+  width:100%;padding:.4rem .7rem;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--fg);font-size:.8rem;outline:none;
+}
+.sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search input::placeholder{color:var(--fg-dim)}
+.toc{padding:.5rem 0;overflow-y:auto;flex:1}
+.toc-group{
+  padding:.85rem 1.2rem .25rem;font-size:.68rem;font-weight:700;
+  color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;
+}
+.toc-item{
+  display:block;padding:.3rem 1.2rem .3rem 1.5rem;font-size:.8rem;
+  color:var(--fg-dim);text-decoration:none;border-left:3px solid transparent;
+  transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.toc-item:hover{color:var(--fg);background:var(--hover)}
+.toc-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--hover);font-weight:600}
+.toc-item.hidden{display:none}
+.toc-item .read-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:6px;flex-shrink:0;background:transparent;vertical-align:middle;
+}
+.toc-item .read-dot.done{background:#4ade80}
+
+/* ── 阅读进度面板 ── */
+.progress-panel{
+  border-top:1px solid var(--border);padding:.9rem 1.2rem;flex-shrink:0;
+}
+.progress-panel .progress-title{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:.72rem;color:var(--fg-dim);margin-bottom:.45rem;
+}
+.progress-panel .progress-title button{
+  background:none;border:none;color:var(--fg-dim);font-size:.68rem;
+  cursor:pointer;padding:0;text-decoration:underline;
+}
+.progress-panel .progress-title button:hover{color:var(--accent)}
+.progress-track{
+  width:100%;height:6px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+}
+.progress-track .progress-fill{
+  height:100%;border-radius:3px;transition:width .4s;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-panel .progress-text{
+  font-size:.7rem;color:var(--fg-dim);margin-top:.35rem;text-align:center;
+}
+.progress-panel .last-read{
+  font-size:.68rem;color:var(--fg-dim);margin-top:.5rem;padding-top:.45rem;
+  border-top:1px solid var(--border);
+}
+.progress-panel .last-read a{
+  color:var(--accent);font-size:.72rem;
+}
+
+/* ── 内容 ── */
+.content{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.chapter{max-width:820px;margin:0 auto;padding:2.5rem 3rem 3rem}
+
+/* ── 排版 ── */
+h1{font-size:1.8rem;color:var(--accent);margin:1.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent);line-height:1.3}
+h2{font-size:1.3rem;color:#e8a317;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.08rem;color:#f0c050;margin:1.5rem 0 .5rem}
+h4{font-size:1rem;color:#b8c8d0;margin:1.2rem 0 .4rem}
+p{margin:.7rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:#fff;font-weight:600}
+em{color:#a0b4be}
+
+/* ── 代码 ── */
+code{
+  background:var(--code-bg);padding:.14em .42em;border-radius:4px;
+  font-size:.87em;font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;color:#e0c080;
+}
+pre{
+  background:var(--code-bg);padding:1rem 1.2rem;border-radius:var(--radius);
+  overflow-x:auto;margin:1rem 0;border:1px solid var(--border);line-height:1.55;
+}
+pre code{background:none;padding:0;color:var(--fg);font-size:.84em}
+
+/* ── 表格 ── */
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9em}
+th,td{border:1px solid var(--border);padding:.45rem .75rem;text-align:left}
+th{background:var(--code-bg);color:var(--accent);font-weight:600;font-size:.86em}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── 引用 / 列表 / 其他 ── */
+blockquote{border-left:4px solid var(--accent2);padding:.4rem 1rem;margin:1rem 0;color:var(--fg-dim);background:rgba(232,163,23,.08);border-radius:0 var(--radius) var(--radius) 0}
+blockquote p{margin:.25rem 0}
+ul,ol{padding-left:1.5rem;margin:.5rem 0}
+li{margin:.25rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+img{max-width:100%;border-radius:var(--radius)}
+
+/* ── 下载按钮 ── */
+.download-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0}
+.dl-btn{
+  display:inline-block;padding:.65rem 1.8rem;border-radius:var(--radius);
+  font-size:.95rem;font-weight:600;text-decoration:none;transition:all .2s;
+  border:2px solid var(--border);
+}
+.dl-btn:hover{text-decoration:none}
+.dl-start{background:var(--accent);color:#000;border-color:var(--accent)}
+.dl-start:hover{background:#e85a2a;border-color:#e85a2a;color:#000}
+.dl-pdf{background:transparent;color:var(--fg);border-color:var(--accent)}
+.dl-pdf:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.dl-epub{background:transparent;color:var(--fg);border-color:var(--border)}
+.dl-epub:hover{border-color:var(--accent);color:var(--accent)}
+.version-info{font-size:.8rem;color:var(--fg-dim)}
+
+/* ── 翻页导航 ── */
+.page-nav{
+  display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+}
+.page-nav a{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.55rem 1.1rem;border-radius:var(--radius);
+  background:var(--code-bg);border:1px solid var(--border);
+  color:var(--fg);font-size:.85rem;text-decoration:none;transition:all .2s;
+  max-width:45%;
+}
+.page-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.page-nav a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-nav .spacer{flex:1}
+
+/* ── 进度条 ── */
+.progress-bar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:3px;z-index:110}
+.progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .1s}
+
+/* ── 回到顶部 ── */
+.back-top{
+  position:fixed;bottom:2rem;right:2rem;width:2.4rem;height:2.4rem;border-radius:50%;
+  background:var(--accent2);color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;transition:opacity .3s;display:flex;align-items:center;justify-content:center;z-index:80;
+}
+.back-top.show{opacity:.8}
+.back-top:hover{opacity:1}
+
+/* ── 移动端 ── */
+.menu-btn{
+  display:none;position:fixed;top:.7rem;left:.7rem;z-index:200;
+  background:var(--bg-side);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--accent);font-size:1.2rem;width:2.4rem;height:2.4rem;cursor:pointer;
+  align-items:center;justify-content:center;
+}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+@media(max-width:900px){
+  :root{--sidebar-w:270px}
+  .chapter{padding:2rem 1.5rem 2.5rem}
+}
+@media(max-width:700px){
+  .sidebar{transform:translateX(-100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .menu-btn{display:flex}
+  .overlay.show{display:block}
+  .chapter{padding:3.2rem 1.1rem 2.5rem}
+  .progress-bar{left:0}
+  h1{font-size:1.45rem} h2{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<div class="progress-bar"><div class="bar"></div></div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1><a href="/" style="color:inherit;text-decoration:none">解密 Frida</a></h1>
+      <p>动态插桩框架源码之旅</p>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" placeholder="搜索章节..." oninput="filterToc(this.value)">
+    </div>
+    <div class="toc"><a class="toc-item" href="cover.html" data-cid="cover"><span class="read-dot" data-cid="cover"></span>封面</a>
+<a class="toc-item" href="preface.html" data-cid="preface"><span class="read-dot" data-cid="preface"></span>前言</a>
+<div class="toc-group">第一部分 起步篇</div>
+<a class="toc-item" href="ch01.html" data-cid="ch01"><span class="read-dot" data-cid="ch01"></span>第1章 走进 Frida 的世界</a>
+<a class="toc-item" href="ch02.html" data-cid="ch02"><span class="read-dot" data-cid="ch02"></span>第2章 源码全景地图</a>
+<a class="toc-item" href="ch03.html" data-cid="ch03"><span class="read-dot" data-cid="ch03"></span>第3章 语言基础速览：C、Vala 与 JavaScript</a>
+<div class="toc-group">第二部分 核心架构篇</div>
+<a class="toc-item" href="ch04.html" data-cid="ch04"><span class="read-dot" data-cid="ch04"></span>第4章 程序的大门——入口与启动流程</a>
+<a class="toc-item" href="ch05.html" data-cid="ch05"><span class="read-dot" data-cid="ch05"></span>第5章 Gum：插桩引擎的心脏</a>
+<a class="toc-item" href="ch06.html" data-cid="ch06"><span class="read-dot" data-cid="ch06"></span>第6章 核心数据结构与接口定义</a>
+<a class="toc-item" href="ch07.html" data-cid="ch07"><span class="read-dot" data-cid="ch07"></span>第7章 构建系统——Meson 与交叉编译</a>
+<div class="toc-group">第三部分 插桩引擎篇</div>
+<a class="toc-item" href="ch08.html" data-cid="ch08"><span class="read-dot" data-cid="ch08"></span>第8章 Interceptor——函数钩子的魔法</a>
+<a class="toc-item" href="ch09.html" data-cid="ch09"><span class="read-dot" data-cid="ch09"></span>第9章 Stalker——代码追踪引擎</a>
+<a class="toc-item" href="ch10.html" data-cid="ch10"><span class="read-dot" data-cid="ch10"></span>第10章 代码生成器——跨架构的机器语言</a>
+<a class="toc-item active" href="ch11.html" data-cid="ch11"><span class="read-dot" data-cid="ch11"></span>第11章 Relocator——代码搬迁的艺术</a>
+<div class="toc-group">第四部分 注入与代理篇</div>
+<a class="toc-item" href="ch12.html" data-cid="ch12"><span class="read-dot" data-cid="ch12"></span>第12章 进程注入——打入目标的第一步</a>
+<a class="toc-item" href="ch13.html" data-cid="ch13"><span class="read-dot" data-cid="ch13"></span>第13章 Agent 生命周期——注入后的世界</a>
+<a class="toc-item" href="ch14.html" data-cid="ch14"><span class="read-dot" data-cid="ch14"></span>第14章 脚本引擎——JavaScript 遇见原生代码</a>
+<a class="toc-item" href="ch15.html" data-cid="ch15"><span class="read-dot" data-cid="ch15"></span>第15章 Gadget 模式——无需注入的插桩</a>
+<div class="toc-group">第五部分 平台子系统篇</div>
+<a class="toc-item" href="ch16.html" data-cid="ch16"><span class="read-dot" data-cid="ch16"></span>第16章 Linux 后端——ptrace 与 ELF 的世界</a>
+<a class="toc-item" href="ch17.html" data-cid="ch17"><span class="read-dot" data-cid="ch17"></span>第17章 Darwin 后端——Mach 端口与 XPC</a>
+<a class="toc-item" href="ch18.html" data-cid="ch18"><span class="read-dot" data-cid="ch18"></span>第18章 Windows 后端——远程线程与调试符号</a>
+<a class="toc-item" href="ch19.html" data-cid="ch19"><span class="read-dot" data-cid="ch19"></span>第19章 移动平台——Android 与 iOS 的特殊挑战</a>
+<div class="toc-group">第六部分 通信与协议篇</div>
+<a class="toc-item" href="ch20.html" data-cid="ch20"><span class="read-dot" data-cid="ch20"></span>第20章 DBus 协议——通信的骨架</a>
+<a class="toc-item" href="ch21.html" data-cid="ch21"><span class="read-dot" data-cid="ch21"></span>第21章 控制服务——网络上的 Frida</a>
+<a class="toc-item" href="ch22.html" data-cid="ch22"><span class="read-dot" data-cid="ch22"></span>第22章 消息系统——脚本与宿主的对话</a>
+<div class="toc-group">第七部分 绑定与工具篇</div>
+<a class="toc-item" href="ch23.html" data-cid="ch23"><span class="read-dot" data-cid="ch23"></span>第23章 Python 绑定——最受欢迎的接口</a>
+<a class="toc-item" href="ch24.html" data-cid="ch24"><span class="read-dot" data-cid="ch24"></span>第24章 Node.js 绑定与其他语言</a>
+<a class="toc-item" href="ch25.html" data-cid="ch25"><span class="read-dot" data-cid="ch25"></span>第25章 命令行工具——frida-tools 全家桶</a>
+<div class="toc-group">第八部分 高级话题篇</div>
+<a class="toc-item" href="ch26.html" data-cid="ch26"><span class="read-dot" data-cid="ch26"></span>第26章 内存操作——扫描、监控与读写</a>
+<a class="toc-item" href="ch27.html" data-cid="ch27"><span class="read-dot" data-cid="ch27"></span>第27章 跨平台设计——一套代码，多个世界</a>
+<a class="toc-item" href="ch28.html" data-cid="ch28"><span class="read-dot" data-cid="ch28"></span>第28章 性能优化——速度的追求</a>
+<div class="toc-group">第九部分 总结篇</div>
+<a class="toc-item" href="ch29.html" data-cid="ch29"><span class="read-dot" data-cid="ch29"></span>第29章 架构之美——设计模式总结</a>
+<a class="toc-item" href="ch30.html" data-cid="ch30"><span class="read-dot" data-cid="ch30"></span>第30章 你的下一步——从读者到贡献者</a>
+<div class="toc-group">附录</div>
+<a class="toc-item" href="appendix-a.html" data-cid="appendix-a"><span class="read-dot" data-cid="appendix-a"></span>附录 A 术语表</a>
+<a class="toc-item" href="appendix-b.html" data-cid="appendix-b"><span class="read-dot" data-cid="appendix-b"></span>附录 B 源码关键文件索引</a>
+<a class="toc-item" href="appendix-c.html" data-cid="appendix-c"><span class="read-dot" data-cid="appendix-c"></span>附录 C 全书知识地图</a>
+<a class="toc-item" href="about.html" data-cid="about"><span class="read-dot" data-cid="about"></span>关于本书</a></div>
+    <div class="progress-panel">
+      <div class="progress-title">
+        <span>阅读进度</span>
+        <button onclick="clearProgress()">清除记录</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="readFill"></div></div>
+      <div class="progress-text" id="readText">0 / 0 章</div>
+      <div class="last-read" id="lastRead"></div>
+    </div>
+  </nav>
+
+  <main class="content">
+    <article class="chapter">
+<h1 id="ch11-h1">第11章：Relocator -- 代码搬迁的艺术</h1>
+
+<blockquote><p>假设你家门口有一块路牌，上面写着&quot;前方 500 米右转到公园&quot;。现在城市改造，要把这块路牌搬到 2 公里外的新路口。你能原封不动地搬过去吗？当然不行——因为从新位置出发，500 米后右转到达的根本不是公园了。你必须重新计算距离，改成&quot;前方 2500 米右转到公园&quot;。这就是代码重定位的核心问题。</p></blockquote>
+
+<h2 id="ch11-h2">11.1 为什么需要重定位？</h2>
+
+<p>回忆第 8 章 Interceptor 的工作原理：Hook 一个函数时，需要把函数开头的几条指令&quot;搬走&quot;，放到 invoke trampoline 里执行，然后在原位置写入跳转指令。</p>
+
+<pre><code>
+原函数:
+  地址 0x1000:  push rbp              ─┐
+  地址 0x1001:  mov rbp, rsp           │ 被搬走
+  地址 0x1004:  sub rsp, 0x20          │
+  地址 0x1008:  call 0x2000           ─┘ &lt;-- 这条有问题！
+  地址 0x100D:  ...
+
+搬到 trampoline（地址 0x5000）:
+  地址 0x5000:  push rbp              -- OK，这条不受地址影响
+  地址 0x5001:  mov rbp, rsp          -- OK
+  地址 0x5004:  sub rsp, 0x20         -- OK
+  地址 0x5008:  call 0x2000           -- 还是 OK 吗？
+</code></pre>
+
+<p>等一下，最后那条 <code>call 0x2000</code> 需要仔细看。在 x86 上，<code>call</code> 指令实际存储的不是绝对地址 <code>0x2000</code>，而是相对偏移量。在原位置 <code>0x1008</code>，偏移量是 <code>0x2000 - 0x100D = 0x0FF3</code>。但搬到 <code>0x5008</code> 后，同样的偏移量会让你跳到 <code>0x500D + 0x0FF3 = 0x6000</code>，完全错误。</p>
+
+<p>这就是 Relocator 要解决的问题：<strong>把指令从一个地址搬到另一个地址时，修正所有与地址相关的编码</strong>。</p>
+
+<h2 id="ch11-h3">11.2 什么指令需要修正？</h2>
+
+<p>不是所有指令都需要修正。需要修正的主要是使用 <strong>PC 相对寻址</strong> 的指令：</p>
+
+<pre><code>
+┌──────────────────────────────────────────────────────────────┐
+│  需要重定位的指令类型                                        │
+│                                                              │
+│  x86/x64:                                                    │
+│  ├─ call rel32        (相对调用)                             │
+│  ├─ jmp rel8/rel32    (相对跳转)                             │
+│  ├─ jcc rel8/rel32    (条件跳转)                             │
+│  ├─ loop/loopz/loopnz (循环指令)                            │
+│  └─ mov/lea [rip+off] (RIP 相对寻址，x64 特有)              │
+│                                                              │
+│  ARM64:                                                      │
+│  ├─ b/bl imm          (分支/调用)                            │
+│  ├─ b.cond imm        (条件分支)                             │
+│  ├─ cbz/cbnz imm      (比较分支)                            │
+│  ├─ tbz/tbnz imm      (测试位分支)                          │
+│  ├─ adr/adrp          (PC 相对取地址)                        │
+│  └─ ldr literal       (PC 相对加载字面量)                    │
+│                                                              │
+│  不需要重定位的指令:                                         │
+│  ├─ mov reg, reg      (寄存器间操作)                         │
+│  ├─ add reg, imm      (立即数运算)                           │
+│  ├─ push/pop          (栈操作)                               │
+│  └─ ret               (返回)                                 │
+└──────────────────────────────────────────────────────────────┘
+</code></pre>
+
+<h2 id="ch11-h4">11.3 Relocator 的结构</h2>
+
+<p>先看 x86 和 ARM64 两种 Relocator 的结构体，它们几乎一致：</p>
+
+<pre><code class="language-c">
+struct _GumX86Relocator
+{
+  volatile gint ref_count;
+
+  csh capstone;             // Capstone 反汇编引擎
+
+  const guint8 * input_start;  // 原始代码起始地址
+  const guint8 * input_cur;    // 当前读取位置
+  GumAddress input_pc;         // 当前 PC 值
+  cs_insn ** input_insns;      // 已读取的指令数组
+  GumX86Writer * output;       // 输出 Writer
+
+  guint inpos;              // 输入游标位置
+  guint outpos;             // 输出游标位置
+
+  gboolean eob;             // End Of Block（遇到分支）
+  gboolean eoi;             // End Of Input（不可继续）
+};
+
+struct _GumArm64Relocator
+{
+  volatile gint ref_count;
+
+  csh capstone;
+
+  const guint8 * input_start;
+  const guint8 * input_cur;
+  GumAddress input_pc;
+  cs_insn ** input_insns;
+  GumArm64Writer * output;    // 注意：输出到 ARM64 Writer
+
+  guint inpos;
+  guint outpos;
+
+  gboolean eob;
+  gboolean eoi;
+};
+</code></pre>
+
+<p>结构完全对称。Relocator 的设计模式是：<strong>用 Capstone 读取（反汇编）原始指令，用 Writer 写入（重新编码）修正后的指令</strong>。</p>
+
+<pre><code>
+┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  原始代码    │     │    Relocator     │     │  新位置代码  │
+│  (地址 A)    │────&gt;│                  │────&gt;│  (地址 B)    │
+│              │     │  Capstone 读取   │     │              │
+│  push rbp    │     │  分析指令类型    │     │  push rbp    │
+│  mov rbp,rsp │     │  修正地址引用    │     │  mov rbp,rsp │
+│  call 0x2000 │     │  Writer 写入     │     │  call 0x2000 │
+│              │     │                  │     │  (偏移已修正)│
+└──────────────┘     └──────────────────┘     └──────────────┘
+</code></pre>
+
+<h2 id="ch11-h5">11.4 read_one / write_one 模式</h2>
+
+<p>Relocator 的核心 API 是两个简洁的操作：<code>read_one</code> 和 <code>write_one</code>。</p>
+
+<pre><code class="language-c">
+// 从输入读取一条指令（用 Capstone 反汇编）
+guint gum_x86_relocator_read_one (GumX86Relocator * self,
+    const cs_insn ** instruction);
+
+// 把读取的指令重定位后写入输出
+gboolean gum_x86_relocator_write_one (GumX86Relocator * self);
+
+// 跳过一条指令（读了但不写）
+void gum_x86_relocator_skip_one (GumX86Relocator * self);
+
+// 一次性读取并写入所有指令
+void gum_x86_relocator_write_all (GumX86Relocator * self);
+</code></pre>
+
+<p>典型的使用方式：</p>
+
+<pre><code class="language-c">
+GumX86Relocator relocator;
+GumX86Writer writer;
+const cs_insn * insn;
+
+// 初始化
+gum_x86_writer_init (&amp;writer, trampoline_buffer);
+gum_x86_relocator_init (&amp;relocator, original_function, &amp;writer);
+
+// 循环读取指令，直到搬够了需要的字节数
+guint total_bytes = 0;
+while (total_bytes &lt; required_bytes)
+{
+  total_bytes = gum_x86_relocator_read_one (&amp;relocator, &amp;insn);
+
+  // 你可以在这里检查指令
+  // 比如打印: printf(&quot;  %s %s\n&quot;, insn-&gt;mnemonic, insn-&gt;op_str);
+}
+
+// 把所有读取的指令写入输出（自动修正地址）
+gum_x86_relocator_write_all (&amp;relocator);
+
+// 在末尾加一条跳转，回到原函数的剩余部分
+gum_x86_writer_put_jmp_address (&amp;writer,
+    GUM_ADDRESS (original_function + total_bytes));
+
+gum_x86_writer_flush (&amp;writer);
+gum_x86_relocator_clear (&amp;relocator);
+gum_x86_writer_clear (&amp;writer);
+</code></pre>
+
+<p>这段代码就是 Interceptor 构建 invoke trampoline 的核心逻辑（简化版）。</p>
+
+<h2 id="ch11-h6">11.5 EOB 和 EOI</h2>
+
+<p>Relocator 有两个重要的状态标志：</p>
+
+<pre><code class="language-c">
+gboolean eob;   // End Of Block
+gboolean eoi;   // End Of Input
+</code></pre>
+
+<ul>
+<li>- <strong>EOB (End Of Block)</strong>: 遇到了分支指令（jmp、call、ret 等），表示当前基本块结束了。后续指令可能不会被执行到。</li>
+<li>- <strong>EOI (End Of Input)</strong>: 遇到了无法继续读取的情况。比如一条无条件跳转 <code>jmp</code> 之后，原始代码流就断了，不应该再继续读取。</li>
+</ul>
+
+<pre><code>
+  mov rax, 1
+  cmp rax, 0
+  je somewhere      &lt;-- EOB = true (条件跳转，可能跳走)
+  add rax, 1        &lt;-- 还可以继续读取
+  jmp elsewhere     &lt;-- EOB = true, EOI = true (无条件跳转，后面不再可达)
+  ???               &lt;-- 不应该继续读取了
+</code></pre>
+
+<p>Interceptor 在搬移指令时会检查这些标志：如果还没搬够需要的字节数就遇到了 EOI，说明目标函数的开头包含一条无条件跳转，这种情况需要特殊处理。</p>
+
+<h2 id="ch11-h7">11.6 不同架构的重定位挑战</h2>
+
+<h3 id="ch11-h8">x86/x64 的挑战</h3>
+
+<p>x86 的主要难点是变长指令。你不知道一条指令有多长，直到你完全解码它。而且 x86 有很多种寻址模式，重定位逻辑相当复杂。</p>
+
+<p>另外，x64 引入了 RIP 相对寻址，很多全局变量访问都使用这种方式：</p>
+
+<pre><code class="language-asm">
+; 原始位置 0x1000:
+mov rax, [rip + 0x1234]    ; 实际访问 0x1000 + 7 + 0x1234 = 0x223B
+
+; 搬到 0x5000 后，必须修改偏移量:
+mov rax, [rip + 0xD234]    ; 保证还是访问 0x223B
+</code></pre>
+
+<h3 id="ch11-h9">ARM64 的挑战</h3>
+
+<p>ARM64 的指令虽然固定 4 字节，但它的 PC 相对寻址范围比较有限：</p>
+
+<pre><code>
+┌────────────────┬──────────────────────┐
+│  指令          │  PC 相对寻址范围     │
+├────────────────┼──────────────────────┤
+│ B (分支)       │ +/- 128 MB           │
+│ B.cond         │ +/- 1 MB             │
+│ CBZ/CBNZ       │ +/- 1 MB             │
+│ TBZ/TBNZ       │ +/- 32 KB            │
+│ ADR            │ +/- 1 MB             │
+│ ADRP           │ +/- 4 GB             │
+│ LDR (literal)  │ +/- 1 MB             │
+└────────────────┴──────────────────────┘
+</code></pre>
+
+<p>如果指令搬移后，原始目标超出了新位置的寻址范围怎么办？Relocator 需要将一条简单的指令&quot;展开&quot;成多条指令：</p>
+
+<pre><code>
+原始（在 0x1000）:
+  b.eq 0x2000          ; 条件跳转，目标在 1MB 内
+
+搬到 0x80000000（很远的地方）后:
+  b.ne skip            ; 反转条件，跳过下面的跳转
+  ldr x17, [pc, #8]    ; 从附近的字面量池加载目标地址
+  br x17               ; 间接跳转
+skip:
+  ...
+  .quad 0x2000          ; 字面量池中存放原始目标地址
+</code></pre>
+
+<p>一条指令变成了好几条，这就是为什么 ARM64 Relocator 的 <code>can_relocate</code> 函数需要一个 <code>available_scratch_reg</code> 参数：</p>
+
+<pre><code class="language-c">
+gboolean gum_arm64_relocator_can_relocate (
+    gpointer address,
+    guint min_bytes,
+    GumRelocationScenario scenario,
+    guint * maximum,
+    arm64_reg * available_scratch_reg);  // 需要一个临时寄存器
+</code></pre>
+
+<p>而 x86 版本不需要这个参数，因为 x86 的间接跳转可以直接用内存地址，不需要额外的寄存器。</p>
+
+<h2 id="ch11-h10">11.7 can_relocate：预检查</h2>
+
+<p>在实际搬移代码之前，Frida 会先检查能否成功重定位：</p>
+
+<pre><code class="language-c">
+// x86 版本：简洁
+gboolean gum_x86_relocator_can_relocate (
+    gpointer address,
+    guint min_bytes,     // 至少需要搬移多少字节
+    guint * maximum);    // 输出：最多能搬多少字节
+
+// ARM64 版本：更复杂
+gboolean gum_arm64_relocator_can_relocate (
+    gpointer address,
+    guint min_bytes,
+    GumRelocationScenario scenario,
+    guint * maximum,
+    arm64_reg * available_scratch_reg);
+</code></pre>
+
+<p>为什么需要预检查？因为有些指令可能无法安全重定位：</p>
+
+<ul>
+<li>- 指令引用了相邻指令的地址（循环指令等）</li>
+<li>- 代码中间有数据混杂（ARM Thumb 模式常见）</li>
+<li>- 搬移后超出了可能的修正范围</li>
+</ul>
+
+<h2 id="ch11-h11">11.8 Writer、Relocator 和 Interceptor 的协作</h2>
+
+<p>让我们看看这三者如何在 Hook 过程中协同工作：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────────────────────┐
+│  Interceptor Hook 流程中的角色分工                          │
+│                                                             │
+│  1. Interceptor 决定要 Hook 函数 foo()                      │
+│     │                                                       │
+│  2. Relocator 检查: can_relocate(foo, 跳转指令长度)         │
+│     │                                                       │
+│  3. Writer 创建 on_enter trampoline:                        │
+│     │  ├─ put_push_all_registers()                          │
+│     │  ├─ put_call(begin_invocation)                        │
+│     │  ├─ put_pop_all_registers()                           │
+│     │  └─ put_jmp(on_invoke_trampoline)                     │
+│     │                                                       │
+│  4. Relocator + Writer 创建 on_invoke trampoline:           │
+│     │  ├─ Relocator: read_one() -- 读原始指令               │
+│     │  ├─ Relocator: write_one() -- 修正后写入              │
+│     │  ├─ (重复直到搬够字节)                                │
+│     │  └─ Writer: put_jmp(foo + 偏移) -- 跳回原函数        │
+│     │                                                       │
+│  5. Writer 创建 on_leave trampoline:                        │
+│     │  ├─ put_push_all_registers()                          │
+│     │  ├─ put_call(end_invocation)                          │
+│     │  ├─ put_pop_all_registers()                           │
+│     │  └─ put_ret() 或 put_jmp(返回地址)                    │
+│     │                                                       │
+│  6. Writer 改写原函数入口:                                  │
+│     │  └─ put_jmp(on_enter_trampoline)                      │
+│     │                                                       │
+│  7. 刷新指令缓存，Hook 生效                                 │
+└─────────────────────────────────────────────────────────────┘
+</code></pre>
+
+<p>三者的关系简单来说：</p>
+
+<ul>
+<li>- <strong>Writer</strong> 是&quot;笔&quot;，负责写入机器码</li>
+<li>- <strong>Relocator</strong> 是&quot;搬运工&quot;，负责把代码从一个地方搬到另一个地方并修正地址</li>
+<li>- <strong>Interceptor</strong> 是&quot;总指挥&quot;，决定搬什么、往哪搬、怎么连接</li>
+</ul>
+
+<h2 id="ch11-h12">11.9 overwritten_prologue 的秘密</h2>
+
+<p>回顾 <code>GumFunctionContext</code> 中的字段：</p>
+
+<pre><code class="language-c">
+guint8 overwritten_prologue[32];
+guint overwritten_prologue_len;
+</code></pre>
+
+<p>为什么是 32 字节？</p>
+
+<p>在 x86_64 上，一条 <code>jmp</code> 跳转指令通常需要 5 字节（1 字节操作码 + 4 字节偏移）。但如果目标太远（超过 2GB），可能需要 14 字节（6 字节操作码 + 8 字节绝对地址）。所以 Frida 需要搬走至少这么多字节的原始代码。</p>
+
+<p>在 ARM64 上，最简单的跳转是 4 字节的 <code>B</code> 指令，但如果距离超过 128MB，可能需要更长的指令序列。</p>
+
+<p>32 字节的缓冲区足以覆盖所有架构的最坏情况。</p>
+
+<h2 id="ch11-h13">11.10 一个完整的重定位例子</h2>
+
+<p>假设我们要 Hook 这个函数：</p>
+
+<pre><code class="language-asm">
+; 原始函数在 0x401000
+0x401000: push rbp
+0x401001: mov rbp, rsp
+0x401004: call 0x402000      ; 相对偏移 = 0x402000 - 0x401009 = 0x0FF7
+0x401009: pop rbp
+0x40100A: ret
+</code></pre>
+
+<p>Interceptor 需要用 5 字节的 <code>jmp</code> 替换开头。我们需要搬走前 9 字节（到 <code>call</code> 指令结束）：</p>
+
+<pre><code class="language-asm">
+; trampoline 在 0x700000
+0x700000: push rbp           ; 原样复制，无需修正
+0x700001: mov rbp, rsp       ; 原样复制，无需修正
+0x700004: call 0x402000      ; 偏移需要修正！
+                             ; 新偏移 = 0x402000 - 0x700009 = 0xFFF01FF7
+                             ; (在 32 位偏移范围内，可以修正)
+0x700009: jmp 0x401009       ; Writer 生成：跳回原函数剩余部分
+
+; 原函数被改写为:
+0x401000: jmp on_enter_trampoline  ; 5 字节
+0x401005: nop                      ; 填充
+0x401006: nop
+0x401007: nop
+0x401008: nop
+0x401009: pop rbp                  ; 不变
+0x40100A: ret                      ; 不变
+</code></pre>
+
+<p>Relocator 在这个过程中自动完成了 <code>call</code> 指令偏移量的修正。</p>
+
+<h2 id="ch11-h14">11.11 静态重定位辅助函数</h2>
+
+<p>Relocator 还提供了一个简便的静态函数，不需要手动管理 Reader/Writer 的生命周期：</p>
+
+<pre><code class="language-c">
+// 一步到位：从 from 复制至少 min_bytes 到 to，返回实际复制的字节数
+guint gum_x86_relocator_relocate (
+    gpointer from,
+    guint min_bytes,
+    gpointer to);
+
+guint gum_arm64_relocator_relocate (
+    gpointer from,
+    guint min_bytes,
+    gpointer to);
+</code></pre>
+
+<p>这个函数内部创建临时的 Writer 和 Relocator，完成重定位后自动清理。适合简单场景。</p>
+
+<h2 id="ch11-h15">11.12 本章小结</h2>
+
+<ul>
+<li>- Relocator 解决的核心问题是：将指令从一个地址搬到另一个地址时，修正所有 PC 相对寻址</li>
+<li>- 内部使用 Capstone 反汇编引擎解析指令，使用 Writer 生成修正后的指令</li>
+<li>- <code>read_one</code> / <code>write_one</code> 是核心操作模式，逐条读取、逐条写入</li>
+<li>- <code>eob</code> 和 <code>eoi</code> 标志帮助判断是否到达基本块或代码流的边界</li>
+<li>- ARM64 的重定位比 x86 更复杂，因为 PC 相对寻址范围有限，可能需要将一条指令展开为多条</li>
+<li>- Writer、Relocator、Interceptor 三者协作完成整个 Hook 流程</li>
+</ul>
+
+<h2 id="ch11-h16">讨论问题</h2>
+
+<ol>
+<li>1. 如果目标函数的前几条指令中包含一条 <code>jmp</code> 到自身的指令（比如一个 spin loop），Relocator 搬移后这条指令应该跳到哪里？跳到 trampoline 中的新位置还是原来的位置？</li>
+</ol>
+
+<ol>
+<li>2. 为什么 ARM64 Relocator 的 <code>can_relocate</code> 需要一个 <code>available_scratch_reg</code> 参数而 x86 版本不需要？结合两种架构的间接跳转机制来分析。</li>
+</ol>
+
+<ol>
+<li>3. 在现代操作系统中，代码段通常是不可写的。Interceptor 在改写函数入口时需要先修改内存保护属性。这个操作在 Frida 的源码中是由谁负责的？（提示：回顾第8章的 <code>GumCodeAllocator</code> 和事务机制）</li>
+</ol>
+
+<hr/>
+
+<p><em>本书由 [everettjf] 使用 Claude Code 分析源码编写 | 保留出处即可自由转载</em></p>
+
+    </article>
+    <nav class="chapter page-nav">
+      <a href="ch10.html" data-dir="prev"><span>&#8592;</span> <span>第10章 代码生成器——跨架构的机器语言</span></a>
+      <span class="spacer"></span>
+      <a href="ch12.html" data-dir="next"><span>第12章 进程注入——打入目标的第一步</span> <span>&#8594;</span></a>
+    </nav>
+  </main>
+</div>
+
+<button class="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function toggleSidebar(){
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+function filterToc(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.toc-item').forEach(a=>{
+    a.classList.toggle('hidden',q&&!a.textContent.toLowerCase().includes(q));
+  });
+}
+window.addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  const pct=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100;
+  document.querySelector('.progress-bar .bar').style.width=pct+'%';
+  document.querySelector('.back-top').classList.toggle('show',h.scrollTop>400);
+},{passive:true});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowLeft'){ const a=document.querySelector('.page-nav a[data-dir=prev]'); if(a) a.click(); }
+  if(e.key==='ArrowRight'){ const a=document.querySelector('.page-nav a[data-dir=next]'); if(a) a.click(); }
+});
+
+const STORAGE_KEY = 'frida_read_progress';
+const CURRENT_CID = 'ch11';
+const ALL_CIDS = ["cover", "preface", "ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07", "ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14", "ch15", "ch16", "ch17", "ch18", "ch19", "ch20", "ch21", "ch22", "ch23", "ch24", "ch25", "ch26", "ch27", "ch28", "ch29", "ch30", "appendix-a", "appendix-b", "appendix-c", "about"];
+const TOTAL = ALL_CIDS.length;
+
+function getProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveProgress(p){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+function markRead(){
+  const p = getProgress();
+  if(!p[CURRENT_CID]){
+    p[CURRENT_CID] = new Date().toISOString();
+    saveProgress(p);
+  }
+  renderProgress();
+}
+function clearProgress(){
+  if(!confirm('确定要清除所有阅读记录吗？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderProgress();
+}
+function renderProgress(){
+  const p = getProgress();
+  const readCount = ALL_CIDS.filter(id => p[id]).length;
+  const pct = TOTAL ? Math.round(readCount / TOTAL * 100) : 0;
+  const fill = document.getElementById('readFill');
+  const text = document.getElementById('readText');
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = readCount + ' / ' + TOTAL + ' 章（' + pct + '%）';
+  document.querySelectorAll('.read-dot').forEach(dot => {
+    dot.classList.toggle('done', !!p[dot.dataset.cid]);
+  });
+  const lastEl = document.getElementById('lastRead');
+  if(lastEl){
+    const entries = Object.entries(p).sort((a,b) => b[1].localeCompare(a[1]));
+    if(entries.length > 0){
+      const [lastCid, lastTime] = entries[0];
+      const link = document.querySelector('.toc-item[data-cid="'+lastCid+'"]');
+      const title = link ? link.textContent.trim() : lastCid;
+      const d = new Date(lastTime);
+      const timeStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+        +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      lastEl.innerHTML = '上次阅读：<a href="'+lastCid+'.html">'+title+'</a><br><span style="font-size:.65rem">'+timeStr+'</span>';
+    } else {
+      lastEl.innerHTML = '<span style="color:var(--fg-dim)">还没有阅读记录</span>';
+    }
+  }
+  if(readCount === TOTAL && TOTAL > 0 && fill){
+    fill.style.background = 'linear-gradient(90deg,#4ade80,#22d3ee)';
+  }
+}
+let _marked = false;
+window.addEventListener('scroll', ()=>{
+  if(_marked) return;
+  const h = document.documentElement;
+  const scrollPct = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  if(scrollPct > 0.8){
+    _marked = true;
+    markRead();
+  }
+}, {passive:true});
+window.addEventListener('load', ()=>{
+  const h = document.documentElement;
+  if(h.scrollHeight <= h.clientHeight * 1.3){
+    setTimeout(()=>{ markRead(); }, 2000);
+  }
+  renderProgress();
+});
+</script>
+</body>
+</html>

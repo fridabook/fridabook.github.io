@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第7章 构建系统——Meson 与交叉编译 - 解密 Frida</title>
+<style>
+:root {
+  --sidebar-w:300px; --bg:#101418; --bg-side:#141a1e; --fg:#d4dde0;
+  --fg-dim:#8899a6; --accent:#ff6b35; --accent2:#e8a317;
+  --code-bg:#181e24; --border:#283038; --hover:#1c2428; --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--fg);line-height:1.85;font-size:15px;
+}
+
+/* ── 布局 ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+  background:var(--bg-side);border-right:1px solid var(--border);
+  overflow-y:auto;z-index:100;display:flex;flex-direction:column;
+}
+.sidebar-header{padding:1.4rem 1.2rem .8rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-header h1{font-size:1.05rem;color:var(--accent);margin:0;font-weight:700}
+.sidebar-header p{font-size:.72rem;color:var(--fg-dim);margin-top:.25rem}
+.sidebar-search{padding:.7rem 1.2rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-search input{
+  width:100%;padding:.4rem .7rem;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--fg);font-size:.8rem;outline:none;
+}
+.sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search input::placeholder{color:var(--fg-dim)}
+.toc{padding:.5rem 0;overflow-y:auto;flex:1}
+.toc-group{
+  padding:.85rem 1.2rem .25rem;font-size:.68rem;font-weight:700;
+  color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;
+}
+.toc-item{
+  display:block;padding:.3rem 1.2rem .3rem 1.5rem;font-size:.8rem;
+  color:var(--fg-dim);text-decoration:none;border-left:3px solid transparent;
+  transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.toc-item:hover{color:var(--fg);background:var(--hover)}
+.toc-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--hover);font-weight:600}
+.toc-item.hidden{display:none}
+.toc-item .read-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:6px;flex-shrink:0;background:transparent;vertical-align:middle;
+}
+.toc-item .read-dot.done{background:#4ade80}
+
+/* ── 阅读进度面板 ── */
+.progress-panel{
+  border-top:1px solid var(--border);padding:.9rem 1.2rem;flex-shrink:0;
+}
+.progress-panel .progress-title{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:.72rem;color:var(--fg-dim);margin-bottom:.45rem;
+}
+.progress-panel .progress-title button{
+  background:none;border:none;color:var(--fg-dim);font-size:.68rem;
+  cursor:pointer;padding:0;text-decoration:underline;
+}
+.progress-panel .progress-title button:hover{color:var(--accent)}
+.progress-track{
+  width:100%;height:6px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+}
+.progress-track .progress-fill{
+  height:100%;border-radius:3px;transition:width .4s;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-panel .progress-text{
+  font-size:.7rem;color:var(--fg-dim);margin-top:.35rem;text-align:center;
+}
+.progress-panel .last-read{
+  font-size:.68rem;color:var(--fg-dim);margin-top:.5rem;padding-top:.45rem;
+  border-top:1px solid var(--border);
+}
+.progress-panel .last-read a{
+  color:var(--accent);font-size:.72rem;
+}
+
+/* ── 内容 ── */
+.content{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.chapter{max-width:820px;margin:0 auto;padding:2.5rem 3rem 3rem}
+
+/* ── 排版 ── */
+h1{font-size:1.8rem;color:var(--accent);margin:1.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent);line-height:1.3}
+h2{font-size:1.3rem;color:#e8a317;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.08rem;color:#f0c050;margin:1.5rem 0 .5rem}
+h4{font-size:1rem;color:#b8c8d0;margin:1.2rem 0 .4rem}
+p{margin:.7rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:#fff;font-weight:600}
+em{color:#a0b4be}
+
+/* ── 代码 ── */
+code{
+  background:var(--code-bg);padding:.14em .42em;border-radius:4px;
+  font-size:.87em;font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;color:#e0c080;
+}
+pre{
+  background:var(--code-bg);padding:1rem 1.2rem;border-radius:var(--radius);
+  overflow-x:auto;margin:1rem 0;border:1px solid var(--border);line-height:1.55;
+}
+pre code{background:none;padding:0;color:var(--fg);font-size:.84em}
+
+/* ── 表格 ── */
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9em}
+th,td{border:1px solid var(--border);padding:.45rem .75rem;text-align:left}
+th{background:var(--code-bg);color:var(--accent);font-weight:600;font-size:.86em}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── 引用 / 列表 / 其他 ── */
+blockquote{border-left:4px solid var(--accent2);padding:.4rem 1rem;margin:1rem 0;color:var(--fg-dim);background:rgba(232,163,23,.08);border-radius:0 var(--radius) var(--radius) 0}
+blockquote p{margin:.25rem 0}
+ul,ol{padding-left:1.5rem;margin:.5rem 0}
+li{margin:.25rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+img{max-width:100%;border-radius:var(--radius)}
+
+/* ── 下载按钮 ── */
+.download-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0}
+.dl-btn{
+  display:inline-block;padding:.65rem 1.8rem;border-radius:var(--radius);
+  font-size:.95rem;font-weight:600;text-decoration:none;transition:all .2s;
+  border:2px solid var(--border);
+}
+.dl-btn:hover{text-decoration:none}
+.dl-start{background:var(--accent);color:#000;border-color:var(--accent)}
+.dl-start:hover{background:#e85a2a;border-color:#e85a2a;color:#000}
+.dl-pdf{background:transparent;color:var(--fg);border-color:var(--accent)}
+.dl-pdf:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.dl-epub{background:transparent;color:var(--fg);border-color:var(--border)}
+.dl-epub:hover{border-color:var(--accent);color:var(--accent)}
+.version-info{font-size:.8rem;color:var(--fg-dim)}
+
+/* ── 翻页导航 ── */
+.page-nav{
+  display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+}
+.page-nav a{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.55rem 1.1rem;border-radius:var(--radius);
+  background:var(--code-bg);border:1px solid var(--border);
+  color:var(--fg);font-size:.85rem;text-decoration:none;transition:all .2s;
+  max-width:45%;
+}
+.page-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.page-nav a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-nav .spacer{flex:1}
+
+/* ── 进度条 ── */
+.progress-bar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:3px;z-index:110}
+.progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .1s}
+
+/* ── 回到顶部 ── */
+.back-top{
+  position:fixed;bottom:2rem;right:2rem;width:2.4rem;height:2.4rem;border-radius:50%;
+  background:var(--accent2);color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;transition:opacity .3s;display:flex;align-items:center;justify-content:center;z-index:80;
+}
+.back-top.show{opacity:.8}
+.back-top:hover{opacity:1}
+
+/* ── 移动端 ── */
+.menu-btn{
+  display:none;position:fixed;top:.7rem;left:.7rem;z-index:200;
+  background:var(--bg-side);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--accent);font-size:1.2rem;width:2.4rem;height:2.4rem;cursor:pointer;
+  align-items:center;justify-content:center;
+}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+@media(max-width:900px){
+  :root{--sidebar-w:270px}
+  .chapter{padding:2rem 1.5rem 2.5rem}
+}
+@media(max-width:700px){
+  .sidebar{transform:translateX(-100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .menu-btn{display:flex}
+  .overlay.show{display:block}
+  .chapter{padding:3.2rem 1.1rem 2.5rem}
+  .progress-bar{left:0}
+  h1{font-size:1.45rem} h2{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<div class="progress-bar"><div class="bar"></div></div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1><a href="/" style="color:inherit;text-decoration:none">解密 Frida</a></h1>
+      <p>动态插桩框架源码之旅</p>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" placeholder="搜索章节..." oninput="filterToc(this.value)">
+    </div>
+    <div class="toc"><a class="toc-item" href="cover.html" data-cid="cover"><span class="read-dot" data-cid="cover"></span>封面</a>
+<a class="toc-item" href="preface.html" data-cid="preface"><span class="read-dot" data-cid="preface"></span>前言</a>
+<div class="toc-group">第一部分 起步篇</div>
+<a class="toc-item" href="ch01.html" data-cid="ch01"><span class="read-dot" data-cid="ch01"></span>第1章 走进 Frida 的世界</a>
+<a class="toc-item" href="ch02.html" data-cid="ch02"><span class="read-dot" data-cid="ch02"></span>第2章 源码全景地图</a>
+<a class="toc-item" href="ch03.html" data-cid="ch03"><span class="read-dot" data-cid="ch03"></span>第3章 语言基础速览：C、Vala 与 JavaScript</a>
+<div class="toc-group">第二部分 核心架构篇</div>
+<a class="toc-item" href="ch04.html" data-cid="ch04"><span class="read-dot" data-cid="ch04"></span>第4章 程序的大门——入口与启动流程</a>
+<a class="toc-item" href="ch05.html" data-cid="ch05"><span class="read-dot" data-cid="ch05"></span>第5章 Gum：插桩引擎的心脏</a>
+<a class="toc-item" href="ch06.html" data-cid="ch06"><span class="read-dot" data-cid="ch06"></span>第6章 核心数据结构与接口定义</a>
+<a class="toc-item active" href="ch07.html" data-cid="ch07"><span class="read-dot" data-cid="ch07"></span>第7章 构建系统——Meson 与交叉编译</a>
+<div class="toc-group">第三部分 插桩引擎篇</div>
+<a class="toc-item" href="ch08.html" data-cid="ch08"><span class="read-dot" data-cid="ch08"></span>第8章 Interceptor——函数钩子的魔法</a>
+<a class="toc-item" href="ch09.html" data-cid="ch09"><span class="read-dot" data-cid="ch09"></span>第9章 Stalker——代码追踪引擎</a>
+<a class="toc-item" href="ch10.html" data-cid="ch10"><span class="read-dot" data-cid="ch10"></span>第10章 代码生成器——跨架构的机器语言</a>
+<a class="toc-item" href="ch11.html" data-cid="ch11"><span class="read-dot" data-cid="ch11"></span>第11章 Relocator——代码搬迁的艺术</a>
+<div class="toc-group">第四部分 注入与代理篇</div>
+<a class="toc-item" href="ch12.html" data-cid="ch12"><span class="read-dot" data-cid="ch12"></span>第12章 进程注入——打入目标的第一步</a>
+<a class="toc-item" href="ch13.html" data-cid="ch13"><span class="read-dot" data-cid="ch13"></span>第13章 Agent 生命周期——注入后的世界</a>
+<a class="toc-item" href="ch14.html" data-cid="ch14"><span class="read-dot" data-cid="ch14"></span>第14章 脚本引擎——JavaScript 遇见原生代码</a>
+<a class="toc-item" href="ch15.html" data-cid="ch15"><span class="read-dot" data-cid="ch15"></span>第15章 Gadget 模式——无需注入的插桩</a>
+<div class="toc-group">第五部分 平台子系统篇</div>
+<a class="toc-item" href="ch16.html" data-cid="ch16"><span class="read-dot" data-cid="ch16"></span>第16章 Linux 后端——ptrace 与 ELF 的世界</a>
+<a class="toc-item" href="ch17.html" data-cid="ch17"><span class="read-dot" data-cid="ch17"></span>第17章 Darwin 后端——Mach 端口与 XPC</a>
+<a class="toc-item" href="ch18.html" data-cid="ch18"><span class="read-dot" data-cid="ch18"></span>第18章 Windows 后端——远程线程与调试符号</a>
+<a class="toc-item" href="ch19.html" data-cid="ch19"><span class="read-dot" data-cid="ch19"></span>第19章 移动平台——Android 与 iOS 的特殊挑战</a>
+<div class="toc-group">第六部分 通信与协议篇</div>
+<a class="toc-item" href="ch20.html" data-cid="ch20"><span class="read-dot" data-cid="ch20"></span>第20章 DBus 协议——通信的骨架</a>
+<a class="toc-item" href="ch21.html" data-cid="ch21"><span class="read-dot" data-cid="ch21"></span>第21章 控制服务——网络上的 Frida</a>
+<a class="toc-item" href="ch22.html" data-cid="ch22"><span class="read-dot" data-cid="ch22"></span>第22章 消息系统——脚本与宿主的对话</a>
+<div class="toc-group">第七部分 绑定与工具篇</div>
+<a class="toc-item" href="ch23.html" data-cid="ch23"><span class="read-dot" data-cid="ch23"></span>第23章 Python 绑定——最受欢迎的接口</a>
+<a class="toc-item" href="ch24.html" data-cid="ch24"><span class="read-dot" data-cid="ch24"></span>第24章 Node.js 绑定与其他语言</a>
+<a class="toc-item" href="ch25.html" data-cid="ch25"><span class="read-dot" data-cid="ch25"></span>第25章 命令行工具——frida-tools 全家桶</a>
+<div class="toc-group">第八部分 高级话题篇</div>
+<a class="toc-item" href="ch26.html" data-cid="ch26"><span class="read-dot" data-cid="ch26"></span>第26章 内存操作——扫描、监控与读写</a>
+<a class="toc-item" href="ch27.html" data-cid="ch27"><span class="read-dot" data-cid="ch27"></span>第27章 跨平台设计——一套代码，多个世界</a>
+<a class="toc-item" href="ch28.html" data-cid="ch28"><span class="read-dot" data-cid="ch28"></span>第28章 性能优化——速度的追求</a>
+<div class="toc-group">第九部分 总结篇</div>
+<a class="toc-item" href="ch29.html" data-cid="ch29"><span class="read-dot" data-cid="ch29"></span>第29章 架构之美——设计模式总结</a>
+<a class="toc-item" href="ch30.html" data-cid="ch30"><span class="read-dot" data-cid="ch30"></span>第30章 你的下一步——从读者到贡献者</a>
+<div class="toc-group">附录</div>
+<a class="toc-item" href="appendix-a.html" data-cid="appendix-a"><span class="read-dot" data-cid="appendix-a"></span>附录 A 术语表</a>
+<a class="toc-item" href="appendix-b.html" data-cid="appendix-b"><span class="read-dot" data-cid="appendix-b"></span>附录 B 源码关键文件索引</a>
+<a class="toc-item" href="appendix-c.html" data-cid="appendix-c"><span class="read-dot" data-cid="appendix-c"></span>附录 C 全书知识地图</a>
+<a class="toc-item" href="about.html" data-cid="about"><span class="read-dot" data-cid="about"></span>关于本书</a></div>
+    <div class="progress-panel">
+      <div class="progress-title">
+        <span>阅读进度</span>
+        <button onclick="clearProgress()">清除记录</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="readFill"></div></div>
+      <div class="progress-text" id="readText">0 / 0 章</div>
+      <div class="last-read" id="lastRead"></div>
+    </div>
+  </nav>
+
+  <main class="content">
+    <article class="chapter">
+<h1 id="ch07-h1">第7章：构建系统——Meson 与交叉编译</h1>
+
+<blockquote><p>你写了一个 C 程序，在你的 Mac 上编译通过了。但你的目标是让它跑在 Android 手机、iOS 设备、Windows 电脑、甚至路由器上。怎么办？你不可能在每个平台上手动敲编译命令。Frida 面临的就是这个问题——它需要在十几种平台和架构组合上构建。今天我们来看 Frida 是怎么用 Meson 构建系统解决这个难题的。</p></blockquote>
+
+<h2 id="ch07-h2">7.1 为什么选择 Meson？</h2>
+
+<p>在 Frida 的历史上，构建系统经历过演变，最终选定了 Meson。为什么不用更&quot;传统&quot;的 CMake 或 Autotools？</p>
+
+<p>Meson 的几个特点特别适合 Frida 这样的项目：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────────────┐
+│              为什么 Meson 适合 Frida                  │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  1. 原生交叉编译支持                                │
+│     - cross file 机制简洁直观                       │
+│     - 清晰区分 host 和 build 机器                   │
+│                                                     │
+│  2. 子项目（subproject）管理                        │
+│     - frida-gum、frida-core 等天然适合子项目模式    │
+│     - 依赖在构建时自动解析                          │
+│                                                     │
+│  3. 构建速度快                                      │
+│     - 后端使用 Ninja，并行编译效率高                │
+│     - 配置阶段也比 CMake 快                         │
+│                                                     │
+│  4. 语法简洁可读                                    │
+│     - 没有 CMake 那种&quot;宏地狱&quot;                      │
+│     - 不像 Autotools 需要 m4 宏和 shell 脚本       │
+│                                                     │
+│  5. 多语言支持                                      │
+│     - C、C++、Vala、Objective-C 都原生支持          │
+│     - Frida 恰好需要所有这些语言                    │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+</code></pre>
+
+<p>特别是第 5 点——Frida 的代码库同时使用了 C（Gum 核心）、C++（V8 集成）、Vala（frida-core）、Objective-C（Darwin 平台支持），能原生支持所有这些语言的构建系统并不多。</p>
+
+<h2 id="ch07-h3">7.2 顶层 meson.build 结构</h2>
+
+<p>Frida 的顶层 <code>meson.build</code> 是整个构建系统的&quot;指挥中心&quot;。我们来逐段解读：</p>
+
+<pre><code class="language-python">
+project(&#x27;frida&#x27;, &#x27;c&#x27;,
+  version: run_command(&#x27;releng&#x27; / &#x27;frida_version.py&#x27;, check: true).stdout().strip(),
+  meson_version: &#x27;&gt;=1.1.0&#x27;,
+)
+</code></pre>
+
+<p>第一行就有一个有趣的设计：版本号不是硬编码的，而是通过 Python 脚本动态获取。这意味着版本号有一个&quot;单一真相源&quot;（single source of truth），避免了多处版本号不一致的问题。</p>
+
+<h3 id="ch07-h4">子项目编排</h3>
+
+<p>接下来是核心的子项目组织：</p>
+
+<pre><code class="language-python">
+# 首先构建 Gum（插桩引擎）
+gum_options = [
+  &#x27;frida_version=&#x27; + meson.project_version(),
+  &#x27;gumjs=enabled&#x27;,
+]
+subproject(&#x27;frida-gum&#x27;, default_options: gum_options)
+
+# 然后构建 Core（核心框架）
+core_options = [
+  &#x27;frida_version=&#x27; + meson.project_version(),
+]
+# 根据条件决定是否构建各组件
+foreach component : [&#x27;server&#x27;, &#x27;portal&#x27;, &#x27;inject&#x27;]
+  core_options += component + &#x27;=&#x27; + (get_option(component)
+    .disable_auto_if(not is_cross_build)
+    .disable_auto_if(is_watchos)
+    .allowed() ? &#x27;enabled&#x27; : &#x27;disabled&#x27;)
+endforeach
+subproject(&#x27;frida-core&#x27;, default_options: core_options)
+</code></pre>
+
+<p>注意构建顺序：<strong>先 Gum，后 Core</strong>。这是因为 Core 依赖 Gum——Core 中的 Agent 需要用 Gum 来实现插桩功能。</p>
+
+<h3 id="ch07-h5">条件构建逻辑</h3>
+
+<p>最有趣的是组件的条件启用逻辑：</p>
+
+<pre><code class="language-python">
+get_option(&#x27;server&#x27;)
+    .disable_auto_if(not is_cross_build)  // 非交叉编译时禁用
+    .disable_auto_if(is_watchos)           // watchOS 上禁用
+    .allowed()
+</code></pre>
+
+<p>这段代码表达的意思是：frida-server 默认只在<strong>交叉编译</strong>时构建。为什么？因为 frida-server 是跑在目标设备上的（比如你的 Android 手机），你通常需要在开发机器上交叉编译它。在非交叉编译场景（比如在 Mac 上为 Mac 构建），你通常不需要 server。</p>
+
+<p>类似地，frida-gadget 也是默认只在交叉编译时构建：</p>
+
+<pre><code class="language-python">
+core_options += &#x27;gadget=&#x27; + (get_option(&#x27;gadget&#x27;)
+    .disable_auto_if(not is_cross_build)
+    .allowed() ? &#x27;enabled&#x27; : &#x27;disabled&#x27;)
+</code></pre>
+
+<h2 id="ch07-h6">7.3 构建选项（meson.options）</h2>
+
+<p>Frida 的构建选项定义在 <code>meson.options</code> 文件中：</p>
+
+<pre><code class="language-python">
+option(&#x27;server&#x27;,      type: &#x27;feature&#x27;, value: &#x27;auto&#x27;,
+  description: &#x27;Build frida-server&#x27;)
+option(&#x27;portal&#x27;,      type: &#x27;feature&#x27;, value: &#x27;disabled&#x27;,
+  description: &#x27;Build frida-portal&#x27;)
+option(&#x27;inject&#x27;,      type: &#x27;feature&#x27;, value: &#x27;auto&#x27;,
+  description: &#x27;Build frida-inject&#x27;)
+option(&#x27;gadget&#x27;,      type: &#x27;feature&#x27;, value: &#x27;auto&#x27;,
+  description: &#x27;Build frida-gadget&#x27;)
+
+option(&#x27;frida_python&#x27;, type: &#x27;feature&#x27;, value: &#x27;auto&#x27;,
+  description: &#x27;Build Python bindings&#x27;)
+option(&#x27;frida_node&#x27;,   type: &#x27;feature&#x27;, value: &#x27;disabled&#x27;,
+  description: &#x27;Build Node.js bindings&#x27;)
+option(&#x27;frida_swift&#x27;,  type: &#x27;feature&#x27;, value: &#x27;disabled&#x27;,
+  description: &#x27;Build Swift bindings&#x27;)
+</code></pre>
+
+<p>注意 <code>value</code> 的三种取值：</p>
+
+<ul>
+<li>- <code>auto</code> —— 让构建系统根据环境自动决定（比如交叉编译时才启用 server）</li>
+<li>- <code>enabled</code> —— 强制启用</li>
+<li>- <code>disabled</code> —— 强制禁用</li>
+</ul>
+
+<p>这个三值逻辑非常灵活。大多数用户不需要修改任何选项，<code>auto</code> 会做出合理的默认选择。高级用户可以通过 <code>-Dserver=enabled</code> 来强制启用或禁用特定组件。</p>
+
+<pre><code>
+┌──────────────────────────────────────────────────┐
+│              构建组件与默认策略                    │
+├──────────────────────────────────────────────────┤
+│                                                  │
+│  组件           默认值    典型场景               │
+│  ──────────     ──────    ──────────             │
+│  server         auto      交叉编译时启用         │
+│  inject         auto      交叉编译时启用         │
+│  gadget         auto      交叉编译时启用         │
+│  portal         disabled  需要时手动启用         │
+│                                                  │
+│  frida_python   auto      本地编译时启用         │
+│  frida_node     disabled  需要时手动启用         │
+│  frida_tools    auto      本地编译时启用         │
+│  frida_swift    disabled  仅 macOS 可用          │
+│  frida_clr      disabled  仅 Windows 可用        │
+│  frida_qml      disabled  需要 Qt6              │
+│                                                  │
+└──────────────────────────────────────────────────┘
+</code></pre>
+
+<h2 id="ch07-h7">7.4 语言绑定的构建</h2>
+
+<p>顶层 <code>meson.build</code> 还负责协调各语言绑定的构建：</p>
+
+<pre><code class="language-python">
+# Python 绑定
+if get_option(&#x27;frida_python&#x27;)
+    .disable_auto_if(is_cross_build)
+    .allowed()
+  run_command(ensure_submodules, &#x27;frida-python&#x27;, check: true)
+  subproject(&#x27;frida-python&#x27;)
+endif
+
+# Node.js 绑定
+if get_option(&#x27;frida_node&#x27;)
+    .disable_auto_if(is_cross_build)
+    .allowed()
+  run_command(ensure_submodules, &#x27;frida-node&#x27;, check: true)
+  subproject(&#x27;frida-node&#x27;)
+endif
+</code></pre>
+
+<p>每个绑定在构建前都会先调用 <code>ensure_submodules</code> 确保对应的 git submodule 已经被检出。这是一个贴心的设计——你不需要手动 <code>git submodule update</code>，构建系统会帮你处理。</p>
+
+<p>语言绑定都有 <code>disable_auto_if(is_cross_build)</code> 这个条件。原因很直观：如果你在 Mac 上为 Android 交叉编译，你不会需要 Android 上的 Python 绑定——Python 绑定是给开发机器用的。</p>
+
+<h2 id="ch07-h8">7.5 交叉编译的工作原理</h2>
+
+<p>交叉编译是 Frida 构建系统中最重要的能力之一。Meson 使用 &quot;cross file&quot; 来描述目标平台的信息：</p>
+
+<pre><code class="language-ini">
+# 示例：android-arm64 交叉编译配置
+[host_machine]
+system = &#x27;android&#x27;
+subsystem = &#x27;android&#x27;
+cpu_family = &#x27;aarch64&#x27;
+cpu = &#x27;aarch64&#x27;
+endian = &#x27;little&#x27;
+
+[binaries]
+c = &#x27;/path/to/ndk/toolchains/.../aarch64-linux-android-clang&#x27;
+cpp = &#x27;/path/to/ndk/toolchains/.../aarch64-linux-android-clang++&#x27;
+ar = &#x27;/path/to/ndk/toolchains/.../llvm-ar&#x27;
+strip = &#x27;/path/to/ndk/toolchains/.../llvm-strip&#x27;
+
+[properties]
+sys_root = &#x27;/path/to/ndk/sysroot&#x27;
+</code></pre>
+
+<p>在 frida-gum 的 <code>meson.build</code> 中，可以看到架构检测的逻辑：</p>
+
+<pre><code class="language-python">
+host_os_family = host_machine.system()
+if host_os_family == &#x27;android&#x27;
+  host_os_family = &#x27;linux&#x27;   # Android 底层是 Linux
+endif
+
+if host_machine.cpu_family() == &#x27;aarch64&#x27;
+  host_arch = &#x27;arm64&#x27;
+  host_abi = &#x27;arm64&#x27;
+elif host_machine.cpu_family() == &#x27;arm&#x27;
+  host_arch = &#x27;arm&#x27;
+  host_abi = &#x27;arm&#x27;
+elif host_machine.cpu_family() == &#x27;mips&#x27;
+  host_arch = &#x27;mips&#x27;
+  if host_machine.endian() == &#x27;little&#x27;
+    host_abi = &#x27;mipsel&#x27;
+  else
+    host_abi = &#x27;mips&#x27;
+  endif
+</code></pre>
+
+<p>这段代码将 Meson 提供的通用架构信息转换为 Frida 内部使用的架构/ABI 标识。注意 MIPS 的特殊处理——同一个 CPU family 根据字节序不同有不同的 ABI。</p>
+
+<p>Meson 的交叉编译能力意味着在配置阶段就确定了&quot;我要为谁编译&quot;。构建系统会自动区分哪些代码需要用本机编译器（比如代码生成工具），哪些需要用交叉编译器（目标平台的产物）。</p>
+
+<h2 id="ch07-h9">7.6 平台差异的处理</h2>
+
+<p>Frida 需要在多种平台上运行，每个平台都有自己的特殊需求。构建系统通过多种方式处理这些差异：</p>
+
+<h3 id="ch07-h10">编译条件宏</h3>
+
+<p>在源码中通过预处理器宏区分平台：</p>
+
+<pre><code class="language-c">
+#if DARWIN
+    // macOS / iOS 特有逻辑
+#elif LINUX
+    // Linux / Android 特有逻辑
+#elif WINDOWS
+    // Windows 特有逻辑
+#endif
+</code></pre>
+
+<h3 id="ch07-h11">Darwin 平台的语言支持</h3>
+
+<p>macOS/iOS 需要 Objective-C 支持，frida-gum 的构建文件中特别处理了这个：</p>
+
+<pre><code class="language-python">
+languages = [&#x27;c&#x27;, &#x27;cpp&#x27;]
+if host_os_family == &#x27;darwin&#x27;
+  languages += [&#x27;objc&#x27;, &#x27;objcpp&#x27;]
+  add_languages(&#x27;objc&#x27;, &#x27;objcpp&#x27;, native: false)
+endif
+</code></pre>
+
+<h3 id="ch07-h12">条件编译后端</h3>
+
+<p>回顾 host-session-service.vala 中的后端选择：</p>
+
+<pre><code class="language-vala">
+private void add_local_backends () {
+#if WINDOWS
+    add_backend (new WindowsHostSessionBackend ());
+#endif
+#if DARWIN
+    add_backend (new DarwinHostSessionBackend ());
+#endif
+#if LINUX
+    add_backend (new LinuxHostSessionBackend ());
+#endif
+}
+</code></pre>
+
+<p>构建系统负责定义这些条件编译宏（WINDOWS、DARWIN、LINUX 等），使得源码可以根据目标平台包含或排除特定后端。</p>
+
+<h2 id="ch07-h13">7.7 子项目依赖与版本管理</h2>
+
+<p>Frida 的子项目形成清晰的依赖链：frida-gum (底层) -&gt; frida-core (中层) -&gt; frida-python/node/swift 等绑定 (上层)。Meson 的子项目机制自动处理构建顺序。</p>
+
+<p>版本号由 Python 脚本从 git 信息动态计算，通过 <code>frida_version</code> 选项传递给每个子项目，确保所有组件版本一致。</p>
+
+<h2 id="ch07-h14">7.8 实际构建命令</h2>
+
+<p>对于想要自己构建 Frida 的读者，以下是常用的构建命令：</p>
+
+<pre><code class="language-bash">
+# 本地构建（开发用，包含 Python 绑定和 CLI 工具）
+meson setup build
+ninja -C build
+
+# 为 Android arm64 交叉编译
+meson setup build-android-arm64 \
+    --cross-file cross/android-arm64.txt
+ninja -C build-android-arm64
+
+# 只构建特定组件
+meson setup build -Dserver=enabled -Dfrida_python=disabled
+
+# 查看所有可用选项
+meson configure build
+</code></pre>
+
+<p>每次 <code>meson setup</code> 都会创建一个独立的构建目录，你可以同时维护多个构建配置互不干扰。</p>
+
+<h2 id="ch07-h15">本章小结</h2>
+
+<ul>
+<li>- Frida 选择 Meson 是因为它原生支持交叉编译、多语言（C/C++/Vala/ObjC）、子项目管理，且语法简洁</li>
+<li>- 顶层 meson.build 通过 subproject() 编排 frida-gum、frida-core 和各语言绑定的构建顺序</li>
+<li>- 构建选项使用 auto/enabled/disabled 三值逻辑，配合 disable_auto_if 实现智能的条件构建</li>
+<li>- 交叉编译通过 cross file 描述目标平台，构建系统自动区分本机工具和目标产物</li>
+<li>- 平台差异通过条件编译宏、语言支持检测、后端选择等多种机制处理</li>
+<li>- 版本号通过 Python 脚本统一计算，确保所有组件版本一致</li>
+</ul>
+
+<h2 id="ch07-h16">思考题</h2>
+
+<ol>
+<li>1. 为什么 frida-server 默认在交叉编译时才构建，而 frida-python 默认在本地编译时才构建？这个设计背后的使用场景假设是什么？</li>
+</ol>
+
+<ol>
+<li>2. 如果你要为一个新的嵌入式平台（比如 RISC-V 架构的 Linux 设备）添加 Frida 支持，你需要在构建系统中做哪些改动？</li>
+</ol>
+
+<ol>
+<li>3. Frida 把版本号从 git 信息动态生成而不是硬编码在文件中。这种做法的好处是什么？有没有潜在的问题？</li>
+</ol>
+
+<hr/>
+
+<p><em>本书由 [everettjf] 使用 Claude Code 分析源码编写 | 保留出处即可自由转载</em></p>
+
+    </article>
+    <nav class="chapter page-nav">
+      <a href="ch06.html" data-dir="prev"><span>&#8592;</span> <span>第6章 核心数据结构与接口定义</span></a>
+      <span class="spacer"></span>
+      <a href="ch08.html" data-dir="next"><span>第8章 Interceptor——函数钩子的魔法</span> <span>&#8594;</span></a>
+    </nav>
+  </main>
+</div>
+
+<button class="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function toggleSidebar(){
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+function filterToc(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.toc-item').forEach(a=>{
+    a.classList.toggle('hidden',q&&!a.textContent.toLowerCase().includes(q));
+  });
+}
+window.addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  const pct=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100;
+  document.querySelector('.progress-bar .bar').style.width=pct+'%';
+  document.querySelector('.back-top').classList.toggle('show',h.scrollTop>400);
+},{passive:true});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowLeft'){ const a=document.querySelector('.page-nav a[data-dir=prev]'); if(a) a.click(); }
+  if(e.key==='ArrowRight'){ const a=document.querySelector('.page-nav a[data-dir=next]'); if(a) a.click(); }
+});
+
+const STORAGE_KEY = 'frida_read_progress';
+const CURRENT_CID = 'ch07';
+const ALL_CIDS = ["cover", "preface", "ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07", "ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14", "ch15", "ch16", "ch17", "ch18", "ch19", "ch20", "ch21", "ch22", "ch23", "ch24", "ch25", "ch26", "ch27", "ch28", "ch29", "ch30", "appendix-a", "appendix-b", "appendix-c", "about"];
+const TOTAL = ALL_CIDS.length;
+
+function getProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveProgress(p){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+function markRead(){
+  const p = getProgress();
+  if(!p[CURRENT_CID]){
+    p[CURRENT_CID] = new Date().toISOString();
+    saveProgress(p);
+  }
+  renderProgress();
+}
+function clearProgress(){
+  if(!confirm('确定要清除所有阅读记录吗？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderProgress();
+}
+function renderProgress(){
+  const p = getProgress();
+  const readCount = ALL_CIDS.filter(id => p[id]).length;
+  const pct = TOTAL ? Math.round(readCount / TOTAL * 100) : 0;
+  const fill = document.getElementById('readFill');
+  const text = document.getElementById('readText');
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = readCount + ' / ' + TOTAL + ' 章（' + pct + '%）';
+  document.querySelectorAll('.read-dot').forEach(dot => {
+    dot.classList.toggle('done', !!p[dot.dataset.cid]);
+  });
+  const lastEl = document.getElementById('lastRead');
+  if(lastEl){
+    const entries = Object.entries(p).sort((a,b) => b[1].localeCompare(a[1]));
+    if(entries.length > 0){
+      const [lastCid, lastTime] = entries[0];
+      const link = document.querySelector('.toc-item[data-cid="'+lastCid+'"]');
+      const title = link ? link.textContent.trim() : lastCid;
+      const d = new Date(lastTime);
+      const timeStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+        +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      lastEl.innerHTML = '上次阅读：<a href="'+lastCid+'.html">'+title+'</a><br><span style="font-size:.65rem">'+timeStr+'</span>';
+    } else {
+      lastEl.innerHTML = '<span style="color:var(--fg-dim)">还没有阅读记录</span>';
+    }
+  }
+  if(readCount === TOTAL && TOTAL > 0 && fill){
+    fill.style.background = 'linear-gradient(90deg,#4ade80,#22d3ee)';
+  }
+}
+let _marked = false;
+window.addEventListener('scroll', ()=>{
+  if(_marked) return;
+  const h = document.documentElement;
+  const scrollPct = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  if(scrollPct > 0.8){
+    _marked = true;
+    markRead();
+  }
+}, {passive:true});
+window.addEventListener('load', ()=>{
+  const h = document.documentElement;
+  if(h.scrollHeight <= h.clientHeight * 1.3){
+    setTimeout(()=>{ markRead(); }, 2000);
+  }
+  renderProgress();
+});
+</script>
+</body>
+</html>

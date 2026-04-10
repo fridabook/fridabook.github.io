@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第21章 控制服务——网络上的 Frida - 解密 Frida</title>
+<style>
+:root {
+  --sidebar-w:300px; --bg:#101418; --bg-side:#141a1e; --fg:#d4dde0;
+  --fg-dim:#8899a6; --accent:#ff6b35; --accent2:#e8a317;
+  --code-bg:#181e24; --border:#283038; --hover:#1c2428; --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--fg);line-height:1.85;font-size:15px;
+}
+
+/* ── 布局 ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+  background:var(--bg-side);border-right:1px solid var(--border);
+  overflow-y:auto;z-index:100;display:flex;flex-direction:column;
+}
+.sidebar-header{padding:1.4rem 1.2rem .8rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-header h1{font-size:1.05rem;color:var(--accent);margin:0;font-weight:700}
+.sidebar-header p{font-size:.72rem;color:var(--fg-dim);margin-top:.25rem}
+.sidebar-search{padding:.7rem 1.2rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-search input{
+  width:100%;padding:.4rem .7rem;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--fg);font-size:.8rem;outline:none;
+}
+.sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search input::placeholder{color:var(--fg-dim)}
+.toc{padding:.5rem 0;overflow-y:auto;flex:1}
+.toc-group{
+  padding:.85rem 1.2rem .25rem;font-size:.68rem;font-weight:700;
+  color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;
+}
+.toc-item{
+  display:block;padding:.3rem 1.2rem .3rem 1.5rem;font-size:.8rem;
+  color:var(--fg-dim);text-decoration:none;border-left:3px solid transparent;
+  transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.toc-item:hover{color:var(--fg);background:var(--hover)}
+.toc-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--hover);font-weight:600}
+.toc-item.hidden{display:none}
+.toc-item .read-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:6px;flex-shrink:0;background:transparent;vertical-align:middle;
+}
+.toc-item .read-dot.done{background:#4ade80}
+
+/* ── 阅读进度面板 ── */
+.progress-panel{
+  border-top:1px solid var(--border);padding:.9rem 1.2rem;flex-shrink:0;
+}
+.progress-panel .progress-title{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:.72rem;color:var(--fg-dim);margin-bottom:.45rem;
+}
+.progress-panel .progress-title button{
+  background:none;border:none;color:var(--fg-dim);font-size:.68rem;
+  cursor:pointer;padding:0;text-decoration:underline;
+}
+.progress-panel .progress-title button:hover{color:var(--accent)}
+.progress-track{
+  width:100%;height:6px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+}
+.progress-track .progress-fill{
+  height:100%;border-radius:3px;transition:width .4s;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-panel .progress-text{
+  font-size:.7rem;color:var(--fg-dim);margin-top:.35rem;text-align:center;
+}
+.progress-panel .last-read{
+  font-size:.68rem;color:var(--fg-dim);margin-top:.5rem;padding-top:.45rem;
+  border-top:1px solid var(--border);
+}
+.progress-panel .last-read a{
+  color:var(--accent);font-size:.72rem;
+}
+
+/* ── 内容 ── */
+.content{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.chapter{max-width:820px;margin:0 auto;padding:2.5rem 3rem 3rem}
+
+/* ── 排版 ── */
+h1{font-size:1.8rem;color:var(--accent);margin:1.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent);line-height:1.3}
+h2{font-size:1.3rem;color:#e8a317;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.08rem;color:#f0c050;margin:1.5rem 0 .5rem}
+h4{font-size:1rem;color:#b8c8d0;margin:1.2rem 0 .4rem}
+p{margin:.7rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:#fff;font-weight:600}
+em{color:#a0b4be}
+
+/* ── 代码 ── */
+code{
+  background:var(--code-bg);padding:.14em .42em;border-radius:4px;
+  font-size:.87em;font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;color:#e0c080;
+}
+pre{
+  background:var(--code-bg);padding:1rem 1.2rem;border-radius:var(--radius);
+  overflow-x:auto;margin:1rem 0;border:1px solid var(--border);line-height:1.55;
+}
+pre code{background:none;padding:0;color:var(--fg);font-size:.84em}
+
+/* ── 表格 ── */
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9em}
+th,td{border:1px solid var(--border);padding:.45rem .75rem;text-align:left}
+th{background:var(--code-bg);color:var(--accent);font-weight:600;font-size:.86em}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── 引用 / 列表 / 其他 ── */
+blockquote{border-left:4px solid var(--accent2);padding:.4rem 1rem;margin:1rem 0;color:var(--fg-dim);background:rgba(232,163,23,.08);border-radius:0 var(--radius) var(--radius) 0}
+blockquote p{margin:.25rem 0}
+ul,ol{padding-left:1.5rem;margin:.5rem 0}
+li{margin:.25rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+img{max-width:100%;border-radius:var(--radius)}
+
+/* ── 下载按钮 ── */
+.download-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0}
+.dl-btn{
+  display:inline-block;padding:.65rem 1.8rem;border-radius:var(--radius);
+  font-size:.95rem;font-weight:600;text-decoration:none;transition:all .2s;
+  border:2px solid var(--border);
+}
+.dl-btn:hover{text-decoration:none}
+.dl-start{background:var(--accent);color:#000;border-color:var(--accent)}
+.dl-start:hover{background:#e85a2a;border-color:#e85a2a;color:#000}
+.dl-pdf{background:transparent;color:var(--fg);border-color:var(--accent)}
+.dl-pdf:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.dl-epub{background:transparent;color:var(--fg);border-color:var(--border)}
+.dl-epub:hover{border-color:var(--accent);color:var(--accent)}
+.version-info{font-size:.8rem;color:var(--fg-dim)}
+
+/* ── 翻页导航 ── */
+.page-nav{
+  display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+}
+.page-nav a{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.55rem 1.1rem;border-radius:var(--radius);
+  background:var(--code-bg);border:1px solid var(--border);
+  color:var(--fg);font-size:.85rem;text-decoration:none;transition:all .2s;
+  max-width:45%;
+}
+.page-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.page-nav a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-nav .spacer{flex:1}
+
+/* ── 进度条 ── */
+.progress-bar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:3px;z-index:110}
+.progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .1s}
+
+/* ── 回到顶部 ── */
+.back-top{
+  position:fixed;bottom:2rem;right:2rem;width:2.4rem;height:2.4rem;border-radius:50%;
+  background:var(--accent2);color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;transition:opacity .3s;display:flex;align-items:center;justify-content:center;z-index:80;
+}
+.back-top.show{opacity:.8}
+.back-top:hover{opacity:1}
+
+/* ── 移动端 ── */
+.menu-btn{
+  display:none;position:fixed;top:.7rem;left:.7rem;z-index:200;
+  background:var(--bg-side);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--accent);font-size:1.2rem;width:2.4rem;height:2.4rem;cursor:pointer;
+  align-items:center;justify-content:center;
+}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+@media(max-width:900px){
+  :root{--sidebar-w:270px}
+  .chapter{padding:2rem 1.5rem 2.5rem}
+}
+@media(max-width:700px){
+  .sidebar{transform:translateX(-100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .menu-btn{display:flex}
+  .overlay.show{display:block}
+  .chapter{padding:3.2rem 1.1rem 2.5rem}
+  .progress-bar{left:0}
+  h1{font-size:1.45rem} h2{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<div class="progress-bar"><div class="bar"></div></div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1><a href="/" style="color:inherit;text-decoration:none">解密 Frida</a></h1>
+      <p>动态插桩框架源码之旅</p>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" placeholder="搜索章节..." oninput="filterToc(this.value)">
+    </div>
+    <div class="toc"><a class="toc-item" href="cover.html" data-cid="cover"><span class="read-dot" data-cid="cover"></span>封面</a>
+<a class="toc-item" href="preface.html" data-cid="preface"><span class="read-dot" data-cid="preface"></span>前言</a>
+<div class="toc-group">第一部分 起步篇</div>
+<a class="toc-item" href="ch01.html" data-cid="ch01"><span class="read-dot" data-cid="ch01"></span>第1章 走进 Frida 的世界</a>
+<a class="toc-item" href="ch02.html" data-cid="ch02"><span class="read-dot" data-cid="ch02"></span>第2章 源码全景地图</a>
+<a class="toc-item" href="ch03.html" data-cid="ch03"><span class="read-dot" data-cid="ch03"></span>第3章 语言基础速览：C、Vala 与 JavaScript</a>
+<div class="toc-group">第二部分 核心架构篇</div>
+<a class="toc-item" href="ch04.html" data-cid="ch04"><span class="read-dot" data-cid="ch04"></span>第4章 程序的大门——入口与启动流程</a>
+<a class="toc-item" href="ch05.html" data-cid="ch05"><span class="read-dot" data-cid="ch05"></span>第5章 Gum：插桩引擎的心脏</a>
+<a class="toc-item" href="ch06.html" data-cid="ch06"><span class="read-dot" data-cid="ch06"></span>第6章 核心数据结构与接口定义</a>
+<a class="toc-item" href="ch07.html" data-cid="ch07"><span class="read-dot" data-cid="ch07"></span>第7章 构建系统——Meson 与交叉编译</a>
+<div class="toc-group">第三部分 插桩引擎篇</div>
+<a class="toc-item" href="ch08.html" data-cid="ch08"><span class="read-dot" data-cid="ch08"></span>第8章 Interceptor——函数钩子的魔法</a>
+<a class="toc-item" href="ch09.html" data-cid="ch09"><span class="read-dot" data-cid="ch09"></span>第9章 Stalker——代码追踪引擎</a>
+<a class="toc-item" href="ch10.html" data-cid="ch10"><span class="read-dot" data-cid="ch10"></span>第10章 代码生成器——跨架构的机器语言</a>
+<a class="toc-item" href="ch11.html" data-cid="ch11"><span class="read-dot" data-cid="ch11"></span>第11章 Relocator——代码搬迁的艺术</a>
+<div class="toc-group">第四部分 注入与代理篇</div>
+<a class="toc-item" href="ch12.html" data-cid="ch12"><span class="read-dot" data-cid="ch12"></span>第12章 进程注入——打入目标的第一步</a>
+<a class="toc-item" href="ch13.html" data-cid="ch13"><span class="read-dot" data-cid="ch13"></span>第13章 Agent 生命周期——注入后的世界</a>
+<a class="toc-item" href="ch14.html" data-cid="ch14"><span class="read-dot" data-cid="ch14"></span>第14章 脚本引擎——JavaScript 遇见原生代码</a>
+<a class="toc-item" href="ch15.html" data-cid="ch15"><span class="read-dot" data-cid="ch15"></span>第15章 Gadget 模式——无需注入的插桩</a>
+<div class="toc-group">第五部分 平台子系统篇</div>
+<a class="toc-item" href="ch16.html" data-cid="ch16"><span class="read-dot" data-cid="ch16"></span>第16章 Linux 后端——ptrace 与 ELF 的世界</a>
+<a class="toc-item" href="ch17.html" data-cid="ch17"><span class="read-dot" data-cid="ch17"></span>第17章 Darwin 后端——Mach 端口与 XPC</a>
+<a class="toc-item" href="ch18.html" data-cid="ch18"><span class="read-dot" data-cid="ch18"></span>第18章 Windows 后端——远程线程与调试符号</a>
+<a class="toc-item" href="ch19.html" data-cid="ch19"><span class="read-dot" data-cid="ch19"></span>第19章 移动平台——Android 与 iOS 的特殊挑战</a>
+<div class="toc-group">第六部分 通信与协议篇</div>
+<a class="toc-item" href="ch20.html" data-cid="ch20"><span class="read-dot" data-cid="ch20"></span>第20章 DBus 协议——通信的骨架</a>
+<a class="toc-item active" href="ch21.html" data-cid="ch21"><span class="read-dot" data-cid="ch21"></span>第21章 控制服务——网络上的 Frida</a>
+<a class="toc-item" href="ch22.html" data-cid="ch22"><span class="read-dot" data-cid="ch22"></span>第22章 消息系统——脚本与宿主的对话</a>
+<div class="toc-group">第七部分 绑定与工具篇</div>
+<a class="toc-item" href="ch23.html" data-cid="ch23"><span class="read-dot" data-cid="ch23"></span>第23章 Python 绑定——最受欢迎的接口</a>
+<a class="toc-item" href="ch24.html" data-cid="ch24"><span class="read-dot" data-cid="ch24"></span>第24章 Node.js 绑定与其他语言</a>
+<a class="toc-item" href="ch25.html" data-cid="ch25"><span class="read-dot" data-cid="ch25"></span>第25章 命令行工具——frida-tools 全家桶</a>
+<div class="toc-group">第八部分 高级话题篇</div>
+<a class="toc-item" href="ch26.html" data-cid="ch26"><span class="read-dot" data-cid="ch26"></span>第26章 内存操作——扫描、监控与读写</a>
+<a class="toc-item" href="ch27.html" data-cid="ch27"><span class="read-dot" data-cid="ch27"></span>第27章 跨平台设计——一套代码，多个世界</a>
+<a class="toc-item" href="ch28.html" data-cid="ch28"><span class="read-dot" data-cid="ch28"></span>第28章 性能优化——速度的追求</a>
+<div class="toc-group">第九部分 总结篇</div>
+<a class="toc-item" href="ch29.html" data-cid="ch29"><span class="read-dot" data-cid="ch29"></span>第29章 架构之美——设计模式总结</a>
+<a class="toc-item" href="ch30.html" data-cid="ch30"><span class="read-dot" data-cid="ch30"></span>第30章 你的下一步——从读者到贡献者</a>
+<div class="toc-group">附录</div>
+<a class="toc-item" href="appendix-a.html" data-cid="appendix-a"><span class="read-dot" data-cid="appendix-a"></span>附录 A 术语表</a>
+<a class="toc-item" href="appendix-b.html" data-cid="appendix-b"><span class="read-dot" data-cid="appendix-b"></span>附录 B 源码关键文件索引</a>
+<a class="toc-item" href="appendix-c.html" data-cid="appendix-c"><span class="read-dot" data-cid="appendix-c"></span>附录 C 全书知识地图</a>
+<a class="toc-item" href="about.html" data-cid="about"><span class="read-dot" data-cid="about"></span>关于本书</a></div>
+    <div class="progress-panel">
+      <div class="progress-title">
+        <span>阅读进度</span>
+        <button onclick="clearProgress()">清除记录</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="readFill"></div></div>
+      <div class="progress-text" id="readText">0 / 0 章</div>
+      <div class="last-read" id="lastRead"></div>
+    </div>
+  </nav>
+
+  <main class="content">
+    <article class="chapter">
+<h1 id="ch21-h1">第21章：控制服务——网络上的 Frida</h1>
+
+<blockquote><p>当你在电脑上运行 <code>frida -H 192.168.1.100 -p 1234</code> 连接到手机上的 frida-server 时，你有没有好奇过：frida-server 到底在监听什么？它是如何把网络上飞来的字节流变成&quot;附加到进程&quot;这样的具体操作的？</p></blockquote>
+
+<h2 id="ch21-h2">21.1 ControlService：Frida 的门面</h2>
+
+<p>如果把 Frida 比作一家餐厅，那么 ControlService 就是餐厅的大门和前台。它负责：</p>
+
+<ul>
+<li>- 监听网络端口，等待客户端连接</li>
+<li>- 验证来客身份（认证）</li>
+<li>- 把客户端的请求转发给后厨（HostSession）</li>
+<li>- 管理所有正在进行的&quot;用餐&quot;（Agent 会话）</li>
+</ul>
+
+<p>在源码中，<code>ControlService</code> 定义在 <code>control-service.vala</code> 中。我们先看它的整体架构：</p>
+
+<pre><code>
+┌───────────────────────────────────────────────────────┐
+│                   ControlService                       │
+│                                                        │
+│  ┌──────────────┐    ┌─────────────────────────────┐  │
+│  │  WebService   │    │     ConnectionHandler       │  │
+│  │  (HTTP/WS)    │───&gt;│                             │  │
+│  │  监听端口     │    │  ┌─────────────────────┐    │  │
+│  └──────────────┘    │  │ AuthenticationChannel│    │  │
+│                       │  │  (验证身份)          │    │  │
+│                       │  └─────────┬───────────┘    │  │
+│                       │            │ 验证通过        │  │
+│                       │            v                 │  │
+│                       │  ┌─────────────────────┐    │  │
+│                       │  │  ControlChannel      │    │  │
+│                       │  │  (正式对话)          │    │  │
+│                       │  └─────────────────────┘    │  │
+│                       └─────────────────────────────┘  │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │              HostSession (后端服务)               │  │
+│  │  DarwinHostSession / LinuxHostSession / ...      │  │
+│  └──────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────┘
+</code></pre>
+
+<h2 id="ch21-h3">21.2 frida-server 的启动流程</h2>
+
+<p>让我们从 <code>server.vala</code> 的 <code>main()</code> 函数开始，看看 frida-server 是如何启动的。</p>
+
+<pre><code class="language-vala">
+// server.vala (简化版)
+private static int main (string[] args) {
+    // 解析命令行参数
+    // --listen, --certificate, --token, --origin 等
+    var ctx = new OptionContext ();
+    ctx.add_main_entries (option_entries, null);
+    ctx.parse (ref args);
+
+    // 构建端点参数
+    var endpoint_params = new EndpointParameters (
+        listen_address,       // 如 &quot;0.0.0.0:27042&quot;
+        0,
+        parse_certificate (certpath),  // TLS 证书
+        origin,               // 允许的 Origin
+        auth_service,         // 认证服务
+        asset_root            // 静态文件目录
+    );
+
+    // 创建并运行 ControlService
+    service = new ControlService (endpoint_params, options);
+    yield service.start (cancellable);
+}
+</code></pre>
+
+<p>默认端口是 <code>27042</code>——这是 Frida 的标志性端口号。整个启动过程可以概括为：</p>
+
+<pre><code>
+解析命令行参数
+       │
+       v
+构建 EndpointParameters (地址、证书、Token)
+       │
+       v
+创建 ControlService
+       │  ├── 创建平台对应的 HostSession
+       │  │   (Darwin/Linux/Windows/FreeBSD)
+       │  └── 创建 WebService (HTTP 服务器)
+       │
+       v
+service.start()
+       │  ├── 启动 WebService 监听端口
+       │  └── 可选: 预加载 (preload)
+       │
+       v
+进入主循环，等待连接
+</code></pre>
+
+<h2 id="ch21-h4">21.3 WebService：HTTP 与 WebSocket</h2>
+
+<p>Frida 的网络传输层基于 HTTP 和 WebSocket。<code>WebService</code> 类封装了这一层，定义在 <code>socket.vala</code> 中：</p>
+
+<pre><code class="language-vala">
+// socket.vala (简化版)
+public sealed class WebService : Object {
+    public signal void incoming (
+        IOStream connection,
+        SocketAddress remote_address,
+        DynamicInterface? dynamic_iface);
+
+    public WebServiceFlavor flavor;     // CONTROL 或 CLUSTER
+    public EndpointParameters endpoint_params;
+
+    public async void start (Cancellable? cancellable);
+    public void stop ();
+}
+</code></pre>
+
+<p>当一个客户端通过 WebSocket 连接到 frida-server 时，发生了什么？</p>
+
+<pre><code>
+┌──────────┐         ┌─────────────────────┐
+│  Client  │         │    frida-server      │
+│          │         │                      │
+└────┬─────┘         └──────────┬───────────┘
+     │                          │
+     │  1. TCP 连接              │
+     │  ──────────────────────&gt; │
+     │                          │
+     │  2. HTTP Upgrade 请求    │
+     │  GET / HTTP/1.1          │
+     │  Upgrade: websocket      │
+     │  ──────────────────────&gt; │
+     │                          │
+     │  3. 101 Switching        │
+     │  &lt;────────────────────── │
+     │                          │
+     │  4. WebSocket 帧         │
+     │  (承载 DBus 消息)        │
+     │  &lt;────────────────────&gt;  │
+     │                          │
+</code></pre>
+
+<p>WebSocket 在这里充当了一个&quot;管道&quot;。一旦 WebSocket 连接建立，Frida 就在上面跑 DBus 协议。WebSocket 的帧机制天然支持消息边界，非常适合承载 DBus 的消息格式。</p>
+
+<p><code>WebServiceFlavor</code> 有两个值：<code>CONTROL</code>（用于 frida-server 的控制通道）和 <code>CLUSTER</code>（用于 Portal 集群模式）。</p>
+
+<h2 id="ch21-h5">21.4 连接的处理流程</h2>
+
+<p>当 WebService 收到一个新连接后，会触发 <code>incoming</code> 信号。ControlService 在 <code>on_server_connection</code> 中处理这个信号：</p>
+
+<pre><code class="language-vala">
+// control-service.vala (简化版)
+private void on_server_connection (IOStream connection,
+        SocketAddress remote_address,
+        DynamicInterface? dynamic_iface) {
+    handler.handle_server_connection.begin (connection);
+}
+</code></pre>
+
+<p><code>ConnectionHandler.handle_server_connection</code> 是关键方法：</p>
+
+<pre><code class="language-vala">
+public async void handle_server_connection (IOStream raw_connection) {
+    // 在 WebSocket 流之上创建 DBus 连接
+    var connection = yield new DBusConnection (
+        raw_connection,
+        null,
+        DELAY_MESSAGE_PROCESSING,  // 先别处理消息
+        null,
+        io_cancellable);
+
+    // 根据是否需要认证，创建不同的 Peer
+    AuthenticationService? auth_service =
+        parent.endpoint_params.auth_service;
+
+    if (auth_service != null)
+        peers[connection] = new AuthenticationChannel (
+            this, connection, auth_service);
+    else
+        peers[connection] = new ControlChannel (
+            this, connection);
+
+    // 开始处理消息
+    connection.start_message_processing ();
+}
+</code></pre>
+
+<p>注意 <code>DELAY_MESSAGE_PROCESSING</code> 这个标志。创建 DBusConnection 时先不处理消息，等到 Peer 对象（AuthenticationChannel 或 ControlChannel）完全初始化后，再调用 <code>start_message_processing()</code>。这避免了初始化过程中的竞态条件。</p>
+
+<h2 id="ch21-h6">21.5 认证与访问控制</h2>
+
+<p>如果 frida-server 启动时指定了 <code>--token</code> 参数，连接的处理会多一个认证步骤：</p>
+
+<pre><code>
+┌──────────┐                        ┌──────────────┐
+│  Client  │                        │ frida-server │
+└────┬─────┘                        └──────┬───────┘
+     │                                     │
+     │  连接建立                            │
+     │  ──────────────────────────────&gt;    │
+     │                                     │
+     │  此时服务端创建 AuthenticationChannel │
+     │  注册 UnauthorizedHostSession       │
+     │  (所有方法都返回&quot;未授权&quot;)            │
+     │                                     │
+     │  调用 authenticate(token)           │
+     │  path: /re/frida/AuthenticationService
+     │  ──────────────────────────────&gt;    │
+     │                                     │
+     │  [验证 token 的 SHA256 哈希]        │
+     │                                     │
+     │  认证成功: 返回 &quot;{}&quot;                │
+     │  &lt;──────────────────────────────    │
+     │                                     │
+     │  服务端&quot;升级&quot;连接:                   │
+     │  AuthenticationChannel              │
+     │      --&gt; ControlChannel             │
+     │  注册真正的 HostSession             │
+     │                                     │
+     │  现在可以正常调用了                   │
+     │  attach(pid=1234)                   │
+     │  ──────────────────────────────&gt;    │
+</code></pre>
+
+<p>在认证通过之前，服务端注册的是一个 <code>UnauthorizedHostSession</code>——这个类实现了 HostSession 的所有方法，但每个方法都简单地抛出&quot;未授权&quot;错误。这种设计很巧妙：客户端看到的接口是一样的，只是在认证前所有操作都被拒绝。</p>
+
+<p>认证通过后，<code>promote_authentication_channel</code> 方法把 AuthenticationChannel 替换为 ControlChannel：</p>
+
+<pre><code class="language-vala">
+public async void promote_authentication_channel (
+        AuthenticationChannel channel) {
+    DBusConnection connection = channel.connection;
+
+    peers.unset (connection);
+    yield channel.close (io_cancellable);
+
+    // 创建新的 ControlChannel，注册真正的 HostSession
+    peers[connection] = new ControlChannel (this, connection);
+}
+</code></pre>
+
+<h2 id="ch21-h7">21.6 ControlChannel：正式的对话</h2>
+
+<p>ControlChannel 是认证后的核心通信通道。它在 DBus 连接上注册各种服务对象，让客户端可以正常操作：</p>
+
+<pre><code>
+ControlChannel 注册的 DBus 对象
+┌──────────────────────────────────────────────┐
+│                                               │
+│  /re/frida/HostSession                       │
+│    -&gt; 进程枚举、attach、spawn 等              │
+│                                               │
+│  /re/frida/TransportBroker                   │
+│    -&gt; TCP 传输协商 (用于 P2P 优化)            │
+│                                               │
+│  /re/frida/BusSession                        │
+│    -&gt; Bus 消息通道                            │
+│                                               │
+│  /re/frida/AgentMessageSink/{session_id}     │
+│    -&gt; 每个 Agent 会话的消息接收端             │
+│                                               │
+└──────────────────────────────────────────────┘
+</code></pre>
+
+<p>当客户端调用 <code>attach()</code> 附加到某个进程后，ControlService 会：</p>
+
+<ol>
+<li>1. 调用底层 HostSession 的 <code>attach()</code> 方法，注入 Agent</li>
+<li>2. 获取 Agent 的 <code>AgentSession</code> 对象</li>
+<li>3. 在客户端的 DBus 连接上注册该 AgentSession</li>
+<li>4. 获取客户端侧的 <code>AgentMessageSink</code> 代理</li>
+</ol>
+
+<p>这样，后续的脚本操作和消息传递就可以直接在 AgentSession 上进行了。</p>
+
+<h2 id="ch21-h8">21.7 TLS 加密</h2>
+
+<p>frida-server 支持 TLS 加密，只需启动时指定证书：</p>
+
+<pre><code class="language-bash">
+frida-server --certificate /path/to/cert.pem
+</code></pre>
+
+<p>在源码中，证书通过 <code>EndpointParameters</code> 传递：</p>
+
+<pre><code class="language-vala">
+var endpoint_params = new EndpointParameters (
+    listen_address,
+    0,
+    parse_certificate (certpath),  // TLS 证书
+    origin,
+    auth_service,
+    asset_root
+);
+</code></pre>
+
+<p>有了 TLS，WebSocket 连接就变成了 WSS（WebSocket Secure），所有通信内容都被加密。这在远程调试时尤其重要——你可不希望你的调试流量在网络上被嗅探。</p>
+
+<h2 id="ch21-h9">21.8 远程调试的完整工作流</h2>
+
+<p>让我们把所有知识串起来，看看远程调试的完整工作流：</p>
+
+<pre><code>
+手机端                                     电脑端
+┌─────────────────┐                  ┌─────────────────┐
+│  frida-server   │                  │  frida CLI      │
+│                 │                  │                 │
+│  1. 启动        │                  │                 │
+│  监听 27042     │                  │                 │
+│                 │  2. TCP 连接     │                 │
+│                 │ &lt;────────────────│  frida -H phone │
+│                 │                  │                 │
+│                 │  3. WebSocket    │                 │
+│                 │  升级 + TLS      │                 │
+│                 │ &lt;───────────────&gt;│                 │
+│                 │                  │                 │
+│  4. DBus 连接   │  5. authenticate │                 │
+│  建立           │ &lt;────────────────│  --token=secret │
+│                 │                  │                 │
+│  6. 认证通过    │                  │                 │
+│  注册真实       │  7. attach(pid)  │                 │
+│  HostSession    │ &lt;────────────────│  -p 1234        │
+│                 │                  │                 │
+│  8. 注入 Agent  │  9. session_id   │                 │
+│  到目标进程     │ ────────────────&gt;│                 │
+│                 │                  │                 │
+│                 │  10. 创建/加载   │                 │
+│                 │  脚本、收发消息   │                 │
+│                 │ &lt;───────────────&gt;│                 │
+└─────────────────┘                  └─────────────────┘
+</code></pre>
+
+<h2 id="ch21-h10">21.9 小结</h2>
+
+<p>本章我们深入分析了 Frida 的控制服务架构。核心要点：</p>
+
+<ul>
+<li>- <strong>ControlService 是 frida-server 的核心</strong>，负责接受连接、认证客户端、管理会话</li>
+<li>- <strong>WebService 提供 HTTP/WebSocket 传输</strong>，DBus 消息在 WebSocket 之上传输</li>
+<li>- <strong>认证采用两阶段设计</strong>：先用 UnauthorizedHostSession 拒绝一切，认证后升级为真正的 ControlChannel</li>
+<li>- <strong>默认端口 27042</strong>，支持 TLS 加密和 Token 认证</li>
+<li>- <strong>ConnectionHandler 管理所有 Peer（连接对）</strong>，每个 DBus 连接对应一个 Peer</li>
+<li>- <strong>frida-server 支持守护进程模式</strong>（<code>--daemonize</code>），使用经典的 Unix fork + pipe 模式</li>
+</ul>
+
+<h2 id="ch21-h11">讨论问题</h2>
+
+<ol>
+<li>1. 为什么 Frida 选择 WebSocket 而不是直接的 TCP 作为传输层？WebSocket 带来了哪些额外的好处？</li>
+<li>2. 认证失败时，为什么不直接断开连接，而是要注册一个 UnauthorizedHostSession？从协议设计的角度思考。</li>
+<li>3. 在真实的渗透测试场景中，如果你发现目标机器上运行着没有开启认证的 frida-server，意味着什么？如何利用，又该如何防范？</li>
+</ol>
+
+<hr/>
+
+<p><em>本书由 [everettjf] 使用 Claude Code 分析源码编写 | 保留出处即可自由转载</em></p>
+
+    </article>
+    <nav class="chapter page-nav">
+      <a href="ch20.html" data-dir="prev"><span>&#8592;</span> <span>第20章 DBus 协议——通信的骨架</span></a>
+      <span class="spacer"></span>
+      <a href="ch22.html" data-dir="next"><span>第22章 消息系统——脚本与宿主的对话</span> <span>&#8594;</span></a>
+    </nav>
+  </main>
+</div>
+
+<button class="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function toggleSidebar(){
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+function filterToc(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.toc-item').forEach(a=>{
+    a.classList.toggle('hidden',q&&!a.textContent.toLowerCase().includes(q));
+  });
+}
+window.addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  const pct=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100;
+  document.querySelector('.progress-bar .bar').style.width=pct+'%';
+  document.querySelector('.back-top').classList.toggle('show',h.scrollTop>400);
+},{passive:true});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowLeft'){ const a=document.querySelector('.page-nav a[data-dir=prev]'); if(a) a.click(); }
+  if(e.key==='ArrowRight'){ const a=document.querySelector('.page-nav a[data-dir=next]'); if(a) a.click(); }
+});
+
+const STORAGE_KEY = 'frida_read_progress';
+const CURRENT_CID = 'ch21';
+const ALL_CIDS = ["cover", "preface", "ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07", "ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14", "ch15", "ch16", "ch17", "ch18", "ch19", "ch20", "ch21", "ch22", "ch23", "ch24", "ch25", "ch26", "ch27", "ch28", "ch29", "ch30", "appendix-a", "appendix-b", "appendix-c", "about"];
+const TOTAL = ALL_CIDS.length;
+
+function getProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveProgress(p){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+function markRead(){
+  const p = getProgress();
+  if(!p[CURRENT_CID]){
+    p[CURRENT_CID] = new Date().toISOString();
+    saveProgress(p);
+  }
+  renderProgress();
+}
+function clearProgress(){
+  if(!confirm('确定要清除所有阅读记录吗？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderProgress();
+}
+function renderProgress(){
+  const p = getProgress();
+  const readCount = ALL_CIDS.filter(id => p[id]).length;
+  const pct = TOTAL ? Math.round(readCount / TOTAL * 100) : 0;
+  const fill = document.getElementById('readFill');
+  const text = document.getElementById('readText');
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = readCount + ' / ' + TOTAL + ' 章（' + pct + '%）';
+  document.querySelectorAll('.read-dot').forEach(dot => {
+    dot.classList.toggle('done', !!p[dot.dataset.cid]);
+  });
+  const lastEl = document.getElementById('lastRead');
+  if(lastEl){
+    const entries = Object.entries(p).sort((a,b) => b[1].localeCompare(a[1]));
+    if(entries.length > 0){
+      const [lastCid, lastTime] = entries[0];
+      const link = document.querySelector('.toc-item[data-cid="'+lastCid+'"]');
+      const title = link ? link.textContent.trim() : lastCid;
+      const d = new Date(lastTime);
+      const timeStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+        +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      lastEl.innerHTML = '上次阅读：<a href="'+lastCid+'.html">'+title+'</a><br><span style="font-size:.65rem">'+timeStr+'</span>';
+    } else {
+      lastEl.innerHTML = '<span style="color:var(--fg-dim)">还没有阅读记录</span>';
+    }
+  }
+  if(readCount === TOTAL && TOTAL > 0 && fill){
+    fill.style.background = 'linear-gradient(90deg,#4ade80,#22d3ee)';
+  }
+}
+let _marked = false;
+window.addEventListener('scroll', ()=>{
+  if(_marked) return;
+  const h = document.documentElement;
+  const scrollPct = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  if(scrollPct > 0.8){
+    _marked = true;
+    markRead();
+  }
+}, {passive:true});
+window.addEventListener('load', ()=>{
+  const h = document.documentElement;
+  if(h.scrollHeight <= h.clientHeight * 1.3){
+    setTimeout(()=>{ markRead(); }, 2000);
+  }
+  renderProgress();
+});
+</script>
+</body>
+</html>

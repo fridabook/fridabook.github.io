@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第26章 内存操作——扫描、监控与读写 - 解密 Frida</title>
+<style>
+:root {
+  --sidebar-w:300px; --bg:#101418; --bg-side:#141a1e; --fg:#d4dde0;
+  --fg-dim:#8899a6; --accent:#ff6b35; --accent2:#e8a317;
+  --code-bg:#181e24; --border:#283038; --hover:#1c2428; --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg);color:var(--fg);line-height:1.85;font-size:15px;
+}
+
+/* ── 布局 ── */
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+  background:var(--bg-side);border-right:1px solid var(--border);
+  overflow-y:auto;z-index:100;display:flex;flex-direction:column;
+}
+.sidebar-header{padding:1.4rem 1.2rem .8rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-header h1{font-size:1.05rem;color:var(--accent);margin:0;font-weight:700}
+.sidebar-header p{font-size:.72rem;color:var(--fg-dim);margin-top:.25rem}
+.sidebar-search{padding:.7rem 1.2rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-search input{
+  width:100%;padding:.4rem .7rem;background:var(--code-bg);
+  border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--fg);font-size:.8rem;outline:none;
+}
+.sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search input::placeholder{color:var(--fg-dim)}
+.toc{padding:.5rem 0;overflow-y:auto;flex:1}
+.toc-group{
+  padding:.85rem 1.2rem .25rem;font-size:.68rem;font-weight:700;
+  color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;
+}
+.toc-item{
+  display:block;padding:.3rem 1.2rem .3rem 1.5rem;font-size:.8rem;
+  color:var(--fg-dim);text-decoration:none;border-left:3px solid transparent;
+  transition:all .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.toc-item:hover{color:var(--fg);background:var(--hover)}
+.toc-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--hover);font-weight:600}
+.toc-item.hidden{display:none}
+.toc-item .read-dot{
+  display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:6px;flex-shrink:0;background:transparent;vertical-align:middle;
+}
+.toc-item .read-dot.done{background:#4ade80}
+
+/* ── 阅读进度面板 ── */
+.progress-panel{
+  border-top:1px solid var(--border);padding:.9rem 1.2rem;flex-shrink:0;
+}
+.progress-panel .progress-title{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:.72rem;color:var(--fg-dim);margin-bottom:.45rem;
+}
+.progress-panel .progress-title button{
+  background:none;border:none;color:var(--fg-dim);font-size:.68rem;
+  cursor:pointer;padding:0;text-decoration:underline;
+}
+.progress-panel .progress-title button:hover{color:var(--accent)}
+.progress-track{
+  width:100%;height:6px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+}
+.progress-track .progress-fill{
+  height:100%;border-radius:3px;transition:width .4s;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.progress-panel .progress-text{
+  font-size:.7rem;color:var(--fg-dim);margin-top:.35rem;text-align:center;
+}
+.progress-panel .last-read{
+  font-size:.68rem;color:var(--fg-dim);margin-top:.5rem;padding-top:.45rem;
+  border-top:1px solid var(--border);
+}
+.progress-panel .last-read a{
+  color:var(--accent);font-size:.72rem;
+}
+
+/* ── 内容 ── */
+.content{margin-left:var(--sidebar-w);flex:1;min-width:0}
+.chapter{max-width:820px;margin:0 auto;padding:2.5rem 3rem 3rem}
+
+/* ── 排版 ── */
+h1{font-size:1.8rem;color:var(--accent);margin:1.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid var(--accent);line-height:1.3}
+h2{font-size:1.3rem;color:#e8a317;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.08rem;color:#f0c050;margin:1.5rem 0 .5rem}
+h4{font-size:1rem;color:#b8c8d0;margin:1.2rem 0 .4rem}
+p{margin:.7rem 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:#fff;font-weight:600}
+em{color:#a0b4be}
+
+/* ── 代码 ── */
+code{
+  background:var(--code-bg);padding:.14em .42em;border-radius:4px;
+  font-size:.87em;font-family:"JetBrains Mono","Fira Code","SF Mono",Menlo,monospace;color:#e0c080;
+}
+pre{
+  background:var(--code-bg);padding:1rem 1.2rem;border-radius:var(--radius);
+  overflow-x:auto;margin:1rem 0;border:1px solid var(--border);line-height:1.55;
+}
+pre code{background:none;padding:0;color:var(--fg);font-size:.84em}
+
+/* ── 表格 ── */
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9em}
+th,td{border:1px solid var(--border);padding:.45rem .75rem;text-align:left}
+th{background:var(--code-bg);color:var(--accent);font-weight:600;font-size:.86em}
+tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── 引用 / 列表 / 其他 ── */
+blockquote{border-left:4px solid var(--accent2);padding:.4rem 1rem;margin:1rem 0;color:var(--fg-dim);background:rgba(232,163,23,.08);border-radius:0 var(--radius) var(--radius) 0}
+blockquote p{margin:.25rem 0}
+ul,ol{padding-left:1.5rem;margin:.5rem 0}
+li{margin:.25rem 0}
+hr{border:none;border-top:1px solid var(--border);margin:2.5rem 0}
+img{max-width:100%;border-radius:var(--radius)}
+
+/* ── 下载按钮 ── */
+.download-buttons{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin:1rem 0}
+.dl-btn{
+  display:inline-block;padding:.65rem 1.8rem;border-radius:var(--radius);
+  font-size:.95rem;font-weight:600;text-decoration:none;transition:all .2s;
+  border:2px solid var(--border);
+}
+.dl-btn:hover{text-decoration:none}
+.dl-start{background:var(--accent);color:#000;border-color:var(--accent)}
+.dl-start:hover{background:#e85a2a;border-color:#e85a2a;color:#000}
+.dl-pdf{background:transparent;color:var(--fg);border-color:var(--accent)}
+.dl-pdf:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.dl-epub{background:transparent;color:var(--fg);border-color:var(--border)}
+.dl-epub:hover{border-color:var(--accent);color:var(--accent)}
+.version-info{font-size:.8rem;color:var(--fg-dim)}
+
+/* ── 翻页导航 ── */
+.page-nav{
+  display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border);
+}
+.page-nav a{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:.55rem 1.1rem;border-radius:var(--radius);
+  background:var(--code-bg);border:1px solid var(--border);
+  color:var(--fg);font-size:.85rem;text-decoration:none;transition:all .2s;
+  max-width:45%;
+}
+.page-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.page-nav a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.page-nav .spacer{flex:1}
+
+/* ── 进度条 ── */
+.progress-bar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:3px;z-index:110}
+.progress-bar .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .1s}
+
+/* ── 回到顶部 ── */
+.back-top{
+  position:fixed;bottom:2rem;right:2rem;width:2.4rem;height:2.4rem;border-radius:50%;
+  background:var(--accent2);color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;transition:opacity .3s;display:flex;align-items:center;justify-content:center;z-index:80;
+}
+.back-top.show{opacity:.8}
+.back-top:hover{opacity:1}
+
+/* ── 移动端 ── */
+.menu-btn{
+  display:none;position:fixed;top:.7rem;left:.7rem;z-index:200;
+  background:var(--bg-side);border:1px solid var(--border);border-radius:var(--radius);
+  color:var(--accent);font-size:1.2rem;width:2.4rem;height:2.4rem;cursor:pointer;
+  align-items:center;justify-content:center;
+}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90}
+@media(max-width:900px){
+  :root{--sidebar-w:270px}
+  .chapter{padding:2rem 1.5rem 2.5rem}
+}
+@media(max-width:700px){
+  .sidebar{transform:translateX(-100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .content{margin-left:0}
+  .menu-btn{display:flex}
+  .overlay.show{display:block}
+  .chapter{padding:3.2rem 1.1rem 2.5rem}
+  .progress-bar{left:0}
+  h1{font-size:1.45rem} h2{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="toggleSidebar()">&#9776;</button>
+<div class="overlay" onclick="toggleSidebar()"></div>
+<div class="progress-bar"><div class="bar"></div></div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1><a href="/" style="color:inherit;text-decoration:none">解密 Frida</a></h1>
+      <p>动态插桩框架源码之旅</p>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" placeholder="搜索章节..." oninput="filterToc(this.value)">
+    </div>
+    <div class="toc"><a class="toc-item" href="cover.html" data-cid="cover"><span class="read-dot" data-cid="cover"></span>封面</a>
+<a class="toc-item" href="preface.html" data-cid="preface"><span class="read-dot" data-cid="preface"></span>前言</a>
+<div class="toc-group">第一部分 起步篇</div>
+<a class="toc-item" href="ch01.html" data-cid="ch01"><span class="read-dot" data-cid="ch01"></span>第1章 走进 Frida 的世界</a>
+<a class="toc-item" href="ch02.html" data-cid="ch02"><span class="read-dot" data-cid="ch02"></span>第2章 源码全景地图</a>
+<a class="toc-item" href="ch03.html" data-cid="ch03"><span class="read-dot" data-cid="ch03"></span>第3章 语言基础速览：C、Vala 与 JavaScript</a>
+<div class="toc-group">第二部分 核心架构篇</div>
+<a class="toc-item" href="ch04.html" data-cid="ch04"><span class="read-dot" data-cid="ch04"></span>第4章 程序的大门——入口与启动流程</a>
+<a class="toc-item" href="ch05.html" data-cid="ch05"><span class="read-dot" data-cid="ch05"></span>第5章 Gum：插桩引擎的心脏</a>
+<a class="toc-item" href="ch06.html" data-cid="ch06"><span class="read-dot" data-cid="ch06"></span>第6章 核心数据结构与接口定义</a>
+<a class="toc-item" href="ch07.html" data-cid="ch07"><span class="read-dot" data-cid="ch07"></span>第7章 构建系统——Meson 与交叉编译</a>
+<div class="toc-group">第三部分 插桩引擎篇</div>
+<a class="toc-item" href="ch08.html" data-cid="ch08"><span class="read-dot" data-cid="ch08"></span>第8章 Interceptor——函数钩子的魔法</a>
+<a class="toc-item" href="ch09.html" data-cid="ch09"><span class="read-dot" data-cid="ch09"></span>第9章 Stalker——代码追踪引擎</a>
+<a class="toc-item" href="ch10.html" data-cid="ch10"><span class="read-dot" data-cid="ch10"></span>第10章 代码生成器——跨架构的机器语言</a>
+<a class="toc-item" href="ch11.html" data-cid="ch11"><span class="read-dot" data-cid="ch11"></span>第11章 Relocator——代码搬迁的艺术</a>
+<div class="toc-group">第四部分 注入与代理篇</div>
+<a class="toc-item" href="ch12.html" data-cid="ch12"><span class="read-dot" data-cid="ch12"></span>第12章 进程注入——打入目标的第一步</a>
+<a class="toc-item" href="ch13.html" data-cid="ch13"><span class="read-dot" data-cid="ch13"></span>第13章 Agent 生命周期——注入后的世界</a>
+<a class="toc-item" href="ch14.html" data-cid="ch14"><span class="read-dot" data-cid="ch14"></span>第14章 脚本引擎——JavaScript 遇见原生代码</a>
+<a class="toc-item" href="ch15.html" data-cid="ch15"><span class="read-dot" data-cid="ch15"></span>第15章 Gadget 模式——无需注入的插桩</a>
+<div class="toc-group">第五部分 平台子系统篇</div>
+<a class="toc-item" href="ch16.html" data-cid="ch16"><span class="read-dot" data-cid="ch16"></span>第16章 Linux 后端——ptrace 与 ELF 的世界</a>
+<a class="toc-item" href="ch17.html" data-cid="ch17"><span class="read-dot" data-cid="ch17"></span>第17章 Darwin 后端——Mach 端口与 XPC</a>
+<a class="toc-item" href="ch18.html" data-cid="ch18"><span class="read-dot" data-cid="ch18"></span>第18章 Windows 后端——远程线程与调试符号</a>
+<a class="toc-item" href="ch19.html" data-cid="ch19"><span class="read-dot" data-cid="ch19"></span>第19章 移动平台——Android 与 iOS 的特殊挑战</a>
+<div class="toc-group">第六部分 通信与协议篇</div>
+<a class="toc-item" href="ch20.html" data-cid="ch20"><span class="read-dot" data-cid="ch20"></span>第20章 DBus 协议——通信的骨架</a>
+<a class="toc-item" href="ch21.html" data-cid="ch21"><span class="read-dot" data-cid="ch21"></span>第21章 控制服务——网络上的 Frida</a>
+<a class="toc-item" href="ch22.html" data-cid="ch22"><span class="read-dot" data-cid="ch22"></span>第22章 消息系统——脚本与宿主的对话</a>
+<div class="toc-group">第七部分 绑定与工具篇</div>
+<a class="toc-item" href="ch23.html" data-cid="ch23"><span class="read-dot" data-cid="ch23"></span>第23章 Python 绑定——最受欢迎的接口</a>
+<a class="toc-item" href="ch24.html" data-cid="ch24"><span class="read-dot" data-cid="ch24"></span>第24章 Node.js 绑定与其他语言</a>
+<a class="toc-item" href="ch25.html" data-cid="ch25"><span class="read-dot" data-cid="ch25"></span>第25章 命令行工具——frida-tools 全家桶</a>
+<div class="toc-group">第八部分 高级话题篇</div>
+<a class="toc-item active" href="ch26.html" data-cid="ch26"><span class="read-dot" data-cid="ch26"></span>第26章 内存操作——扫描、监控与读写</a>
+<a class="toc-item" href="ch27.html" data-cid="ch27"><span class="read-dot" data-cid="ch27"></span>第27章 跨平台设计——一套代码，多个世界</a>
+<a class="toc-item" href="ch28.html" data-cid="ch28"><span class="read-dot" data-cid="ch28"></span>第28章 性能优化——速度的追求</a>
+<div class="toc-group">第九部分 总结篇</div>
+<a class="toc-item" href="ch29.html" data-cid="ch29"><span class="read-dot" data-cid="ch29"></span>第29章 架构之美——设计模式总结</a>
+<a class="toc-item" href="ch30.html" data-cid="ch30"><span class="read-dot" data-cid="ch30"></span>第30章 你的下一步——从读者到贡献者</a>
+<div class="toc-group">附录</div>
+<a class="toc-item" href="appendix-a.html" data-cid="appendix-a"><span class="read-dot" data-cid="appendix-a"></span>附录 A 术语表</a>
+<a class="toc-item" href="appendix-b.html" data-cid="appendix-b"><span class="read-dot" data-cid="appendix-b"></span>附录 B 源码关键文件索引</a>
+<a class="toc-item" href="appendix-c.html" data-cid="appendix-c"><span class="read-dot" data-cid="appendix-c"></span>附录 C 全书知识地图</a>
+<a class="toc-item" href="about.html" data-cid="about"><span class="read-dot" data-cid="about"></span>关于本书</a></div>
+    <div class="progress-panel">
+      <div class="progress-title">
+        <span>阅读进度</span>
+        <button onclick="clearProgress()">清除记录</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="readFill"></div></div>
+      <div class="progress-text" id="readText">0 / 0 章</div>
+      <div class="last-read" id="lastRead"></div>
+    </div>
+  </nav>
+
+  <main class="content">
+    <article class="chapter">
+<h1 id="ch26-h1">第26章：内存操作——扫描、监控与读写</h1>
+
+<blockquote><p>如果你能随意翻看别人书架上的每一本书，找到某一页的某一句话，甚至在上面涂涂改改，你会做什么？在动态插桩的世界里，内存就是那个书架，而 Frida 给了你一把万能钥匙。</p></blockquote>
+
+<h2 id="ch26-h2">26.1 为什么内存操作是核心能力</h2>
+
+<p>在逆向工程和安全研究中，几乎所有的工作最终都归结为&quot;读内存&quot;和&quot;写内存&quot;。Hook 函数是在代码段写入跳转指令，读取返回值是在栈上读内存，修改游戏数值是在堆上写内存。可以说，没有内存操作能力的插桩框架就像一把没有刀刃的瑞士军刀——好看但没用。</p>
+
+<p>Frida 的内存操作能力主要集中在 <code>frida-gum</code> 的 <code>gummemory.h</code> 中，它提供了一套完整的内存读写、扫描、保护、分配的 API。让我们逐一拆解。</p>
+
+<h2 id="ch26-h3">26.2 内存的基本抽象</h2>
+
+<p>在深入具体操作之前，我们先看看 Frida 如何描述内存。这就好比你要去图书馆找书，首先得知道图书馆的编目系统。</p>
+
+<h3 id="ch26-h4">内存范围（GumMemoryRange）</h3>
+
+<pre><code class="language-c">
+struct _GumMemoryRange
+{
+  GumAddress base_address;  // 起始地址
+  gsize size;               // 大小
+};
+</code></pre>
+
+<p>简单得不能再简单——一个起始地址加一个大小，就描述了内存中的一块连续区域。Frida 还贴心地提供了一个宏来判断某个地址是否在范围内：</p>
+
+<pre><code class="language-c">
+#define GUM_MEMORY_RANGE_INCLUDES(r, a) \
+    ((a) &gt;= (r)-&gt;base_address &amp;&amp; \
+     (a) &lt; ((r)-&gt;base_address + (r)-&gt;size))
+</code></pre>
+
+<h3 id="ch26-h5">页面保护（GumPageProtection）</h3>
+
+<pre><code class="language-c">
+enum _GumPageProtection
+{
+  GUM_PAGE_NO_ACCESS = 0,
+  GUM_PAGE_READ      = (1 &lt;&lt; 0),  // 可读
+  GUM_PAGE_WRITE     = (1 &lt;&lt; 1),  // 可写
+  GUM_PAGE_EXECUTE   = (1 &lt;&lt; 2),  // 可执行
+};
+</code></pre>
+
+<p>通过位运算组合出 <code>GUM_PAGE_RW</code>、<code>GUM_PAGE_RX</code>、<code>GUM_PAGE_RWX</code> 等常用保护属性。值得注意的是，现代操作系统越来越限制 RWX 页面，Frida 通过 <code>gum_query_rwx_support()</code> 查询支持程度。</p>
+
+<h2 id="ch26-h6">26.3 内存读写：最基本的操作</h2>
+
+<h3 id="ch26-h7">读取内存</h3>
+
+<pre><code class="language-c">
+guint8 * gum_memory_read (gconstpointer address,
+                          gsize len,
+                          gsize * n_bytes_read);
+</code></pre>
+
+<p>看起来很简单对吧？但实现可没那么简单。以 Linux 平台为例，Frida 的读取策略分两步：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────┐
+│            gum_memory_read 流程              │
+├─────────────────────────────────────────────┤
+│                                             │
+│  1. 优先使用 process_vm_readv 系统调用       │
+│     (内核 &gt;= 3.2 才支持)                    │
+│     ┌──────────┐     ┌──────────┐           │
+│     │ local    │ &lt;-- │ remote   │           │
+│     │ iov_base │     │ iov_base │           │
+│     │ iov_len  │     │ iov_len  │           │
+│     └──────────┘     └──────────┘           │
+│                                             │
+│  2. 如果系统调用不可用(ENOSYS)，              │
+│     回退到检查权限后直接 memcpy              │
+│                                             │
+└─────────────────────────────────────────────┘
+</code></pre>
+
+<p>为什么要用 <code>process_vm_readv</code> 而不是直接 <code>memcpy</code>？因为直接 <code>memcpy</code> 如果遇到不可读的内存会导致段错误（SIGSEGV）。<code>process_vm_readv</code> 是一个安全的系统调用，如果读取失败会返回错误码而不是崩溃。这就像是用一根绝缘的钓鱼竿去触碰电线——即使电线带电，你也不会触电。</p>
+
+<h3 id="ch26-h8">写入内存</h3>
+
+<pre><code class="language-c">
+gboolean gum_memory_write (gpointer address,
+                           const guint8 * bytes,
+                           gsize len);
+</code></pre>
+
+<p>写入内存同样使用 <code>process_vm_writev</code> 作为首选方案，回退方案是检查可写性后直接 <code>memcpy</code>。</p>
+
+<h3 id="ch26-h9">修补代码段</h3>
+
+<p>代码段通常是只读可执行的（RX），你不能直接写入。Frida 提供了 <code>gum_memory_patch_code</code> 来安全地修改代码：</p>
+
+<pre><code class="language-c">
+gboolean gum_memory_patch_code (gpointer address, gsize size,
+    GumMemoryPatchApplyFunc apply, gpointer apply_data);
+</code></pre>
+
+<p>它的工作原理大致是：先把目标页面改为可写，执行你的修改回调，然后恢复原来的保护属性，最后刷新指令缓存。这个&quot;刷新指令缓存&quot;的步骤（<code>gum_clear_cache</code>）在 ARM 架构上尤其重要，因为 ARM 的指令缓存和数据缓存是分离的。</p>
+
+<h2 id="ch26-h10">26.4 内存扫描：大海捞针的艺术</h2>
+
+<p>内存扫描是逆向工程中的常用操作。比如你想找到某个加密密钥在内存中的位置，或者定位某个字符串。Frida 的内存扫描 API 是：</p>
+
+<pre><code class="language-c">
+void gum_memory_scan (const GumMemoryRange * range,
+                      const GumMatchPattern * pattern,
+                      GumMemoryScanMatchFunc func,
+                      gpointer user_data);
+</code></pre>
+
+<h3 id="ch26-h11">模式匹配的两种方式</h3>
+
+<p>Frida 支持两种扫描模式：</p>
+
+<p><strong>十六进制模式（带通配符）：</strong></p>
+
+<pre><code class="language-javascript">
+// JavaScript 层的用法
+Memory.scan(address, size, &quot;48 8b ?? 10 ff&quot;);
+</code></pre>
+
+<p><code>??</code> 表示任意字节。在 C 层，这种模式被解析为一系列 Token，每个 Token 要么是精确匹配，要么是带掩码的匹配。</p>
+
+<p><strong>正则表达式模式：</strong></p>
+
+<pre><code class="language-c">
+// 内部支持正则扫描
+gum_memory_scan_regex(range, regex, func, user_data);
+</code></pre>
+
+<h3 id="ch26-h12">扫描算法的优化</h3>
+
+<p>看源码中的 <code>gum_memory_scan_raw</code> 实现，可以发现一个聪明的优化：</p>
+
+<pre><code>
+┌──────────────────────────────────────────────┐
+│         内存扫描优化策略                       │
+├──────────────────────────────────────────────┤
+│                                              │
+│  1. 从所有 Token 中找到最长的精确匹配 Token    │
+│  2. 以此 Token 作为&quot;锚点&quot;进行扫描              │
+│  3. 找到锚点匹配后，再验证完整模式              │
+│                                              │
+│  类比：在一本书中找&quot;红色的大象在跳舞&quot;           │
+│  - 先快速翻页找&quot;大象&quot;（最长的确定性词）         │
+│  - 找到后再看前后文是否匹配完整句子             │
+│                                              │
+└──────────────────────────────────────────────┘
+</code></pre>
+
+<p>这种&quot;最长锚点优先&quot;的策略大大减少了不必要的完整模式匹配，提升了扫描速度。</p>
+
+<h2 id="ch26-h13">26.5 内存访问监控（MemoryAccessMonitor）</h2>
+
+<p>如果说内存扫描是&quot;主动查找&quot;，那内存访问监控就是&quot;被动等待&quot;。它能告诉你：谁在什么时候读了或写了某块内存。</p>
+
+<pre><code class="language-c">
+struct _GumMemoryAccessDetails
+{
+  GumThreadId thread_id;       // 哪个线程
+  GumMemoryOperation operation; // 读、写还是执行
+  gpointer from;               // 从哪条指令发起的
+  gpointer address;            // 访问的目标地址
+  guint range_index;           // 命中了第几个监控范围
+  guint page_index;            // 范围内第几页
+  guint pages_completed;       // 已完成监控的页数
+  guint pages_total;           // 总监控页数
+  GumCpuContext * context;     // CPU 上下文快照
+};
+</code></pre>
+
+<p>它的工作原理非常巧妙：</p>
+
+<pre><code>
+┌─────────────────────────────────────────────────┐
+│       MemoryAccessMonitor 工作原理               │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  1. 将目标内存页的保护设为 NO_ACCESS             │
+│                                                 │
+│  2. 当有代码尝试访问时：                          │
+│     -&gt; 触发异常/信号 (SIGSEGV/异常)              │
+│     -&gt; Frida 捕获异常                            │
+│     -&gt; 记录访问详情                              │
+│     -&gt; 恢复页面保护                              │
+│     -&gt; 调用用户回调                              │
+│     -&gt; 继续执行                                  │
+│                                                 │
+│  类似于：在书页上放一根头发                       │
+│  如果有人翻过这页，头发就会掉落                   │
+│                                                 │
+└─────────────────────────────────────────────────┘
+</code></pre>
+
+<p><code>auto_reset</code> 参数控制是否在每次触发后自动重新设置陷阱。如果设为 <code>TRUE</code>，每次访问都会触发回调；如果设为 <code>FALSE</code>，则每页只触发一次。</p>
+
+<p>在不同平台上，异常的捕获机制不同：</p>
+<ul>
+<li>- <strong>Windows</strong>: 使用 Vectored Exception Handler</li>
+<li>- <strong>POSIX (Linux/macOS)</strong>: 使用信号处理器捕获 SIGSEGV</li>
+</ul>
+
+<h2 id="ch26-h14">26.6 内存分配：在目标进程中开辟空间</h2>
+
+<p>Frida 经常需要在目标进程中分配内存。比如写入 Trampoline 代码、存储 Hook 的上下文数据等。</p>
+
+<h3 id="ch26-h15">基本分配</h3>
+
+<pre><code class="language-c">
+gpointer gum_alloc_n_pages (guint n_pages, GumPageProtection prot);
+</code></pre>
+
+<h3 id="ch26-h16">近距离分配</h3>
+
+<p>这是一个非常重要的能力。在 x86-64 和 ARM64 上，很多跳转指令只能跳到相对距离有限的地址。所以 Frida 需要在目标地址附近分配内存：</p>
+
+<pre><code class="language-c">
+gpointer gum_alloc_n_pages_near (guint n_pages,
+    GumPageProtection prot,
+    const GumAddressSpec * spec);
+</code></pre>
+
+<p><code>GumAddressSpec</code> 描述了&quot;靠近哪里&quot;和&quot;最远多远&quot;：</p>
+
+<pre><code class="language-c">
+struct _GumAddressSpec
+{
+  gpointer near_address;  // 靠近这个地址
+  gsize max_distance;     // 最大距离
+};
+</code></pre>
+
+<p>这就像是你要在学校旁边租房，<code>near_address</code> 是学校地址，<code>max_distance</code> 是你愿意走的最远距离。</p>
+
+<h3 id="ch26-h17">内存生命周期管理</h3>
+
+<p>Frida 还提供了更细粒度的内存管理 API：</p>
+
+<pre><code>
+┌──────────────────────────────────────────┐
+│        内存生命周期 API                   │
+├──────────────────────────────────────────┤
+│ gum_memory_allocate  -- 分配              │
+│ gum_memory_recommit  -- 重新提交物理页     │
+│ gum_memory_decommit  -- 释放物理页         │
+│ gum_memory_discard   -- 标记可丢弃        │
+│ gum_memory_release   -- 释放虚拟地址空间   │
+│ gum_memory_free      -- 完全释放          │
+└──────────────────────────────────────────┘
+</code></pre>
+
+<p>这套 API 对应了操作系统虚拟内存管理的各个阶段，让 Frida 能够精确控制内存的使用。</p>
+
+<h2 id="ch26-h18">26.7 Frida 自己的堆管理</h2>
+
+<p>一个有趣的细节：Frida 没有直接使用系统的 <code>malloc</code>，而是嵌入了 <code>dlmalloc</code>（Doug Lea 的 malloc 实现），创建了独立的内存空间（mspace）：</p>
+
+<pre><code class="language-c">
+gum_mspace_main = create_mspace(0, TRUE);
+gum_mspace_internal = create_mspace(0, TRUE);
+</code></pre>
+
+<p>为什么要这样做？因为 Frida 运行在目标进程中，如果和目标进程共用堆分配器，可能会导致：</p>
+<ol>
+<li>1. 插桩代码影响目标进程的内存布局</li>
+<li>2. 目标进程的堆损坏波及到 Frida 自身</li>
+<li>3. 在 Hook <code>malloc</code>/<code>free</code> 时产生无限递归</li>
+</ol>
+
+<p>使用独立的 mspace 就像是在别人家的厨房里自带了一套锅碗瓢盆——你用你的，他用他的，互不干扰。</p>
+
+<h2 id="ch26-h19">26.8 实际应用示例</h2>
+
+<p>让我们用 Frida 的 JavaScript API 做几个实际的内存操作：</p>
+
+<pre><code class="language-javascript">
+// 1. 读取内存
+var buf = Memory.readByteArray(ptr(&quot;0x12345678&quot;), 16);
+
+// 2. 写入内存
+Memory.writeByteArray(ptr(&quot;0x12345678&quot;),
+    [0x90, 0x90, 0x90, 0x90]);  // NOP sled
+
+// 3. 扫描内存中的特定模式
+Memory.scan(module.base, module.size, &quot;48 89 5c 24 ?? 57&quot;,
+{
+    onMatch: function(address, size) {
+        console.log(&quot;Found at: &quot; + address);
+    },
+    onComplete: function() {
+        console.log(&quot;Scan complete&quot;);
+    }
+});
+
+// 4. 监控内存访问
+MemoryAccessMonitor.enable([
+    { base: ptr(&quot;0x12345678&quot;), size: 4096 }
+], {
+    onAccess: function(details) {
+        console.log(details.operation +
+            &quot; at &quot; + details.address +
+            &quot; from &quot; + details.from);
+    }
+});
+
+// 5. 在目标进程中分配内存
+var page = Memory.alloc(4096);
+Memory.protect(page, 4096, &#x27;rwx&#x27;);
+</code></pre>
+
+<h2 id="ch26-h20">26.9 本章小结</h2>
+
+<ul>
+<li>- Frida 用 <code>GumMemoryRange</code> 和 <code>GumPageProtection</code> 构建了统一的内存抽象</li>
+<li>- 内存读写优先使用安全的系统调用（<code>process_vm_readv/writev</code>），避免因访问无效内存而崩溃</li>
+<li>- 内存扫描采用&quot;最长精确 Token 锚点&quot;策略优化性能</li>
+<li>- <code>MemoryAccessMonitor</code> 利用页面保护机制实现访问监控，巧妙地把操作系统的异常处理变成了监控工具</li>
+<li>- 近距离内存分配（<code>alloc_near</code>）解决了跳转距离限制的问题</li>
+<li>- Frida 使用独立的 <code>dlmalloc</code> mspace 避免与目标进程的堆管理冲突</li>
+</ul>
+
+<h2 id="ch26-h21">讨论问题</h2>
+
+<ol>
+<li>1. <code>MemoryAccessMonitor</code> 通过修改页面保护来监控访问，这种方式对性能有什么影响？在什么场景下这种开销是可接受的？</li>
+</ol>
+
+<ol>
+<li>2. 为什么 Frida 要区分 <code>gum_memory_decommit</code> 和 <code>gum_memory_free</code>？在插桩场景中，精细的内存生命周期管理有什么好处？</li>
+</ol>
+
+<ol>
+<li>3. 如果目标进程使用了自定义的内存分配器（比如 jemalloc 或 tcmalloc），Frida 使用独立的 dlmalloc mspace 是否足够安全？可能还存在哪些潜在的冲突？</li>
+</ol>
+
+<hr/>
+
+<p><em>本书由 [everettjf] 使用 Claude Code 分析源码编写 | 保留出处即可自由转载</em></p>
+
+    </article>
+    <nav class="chapter page-nav">
+      <a href="ch25.html" data-dir="prev"><span>&#8592;</span> <span>第25章 命令行工具——frida-tools 全家桶</span></a>
+      <span class="spacer"></span>
+      <a href="ch27.html" data-dir="next"><span>第27章 跨平台设计——一套代码，多个世界</span> <span>&#8594;</span></a>
+    </nav>
+  </main>
+</div>
+
+<button class="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<script>
+function toggleSidebar(){
+  document.querySelector('.sidebar').classList.toggle('open');
+  document.querySelector('.overlay').classList.toggle('show');
+}
+function filterToc(q){
+  q=q.toLowerCase();
+  document.querySelectorAll('.toc-item').forEach(a=>{
+    a.classList.toggle('hidden',q&&!a.textContent.toLowerCase().includes(q));
+  });
+}
+window.addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  const pct=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100;
+  document.querySelector('.progress-bar .bar').style.width=pct+'%';
+  document.querySelector('.back-top').classList.toggle('show',h.scrollTop>400);
+},{passive:true});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowLeft'){ const a=document.querySelector('.page-nav a[data-dir=prev]'); if(a) a.click(); }
+  if(e.key==='ArrowRight'){ const a=document.querySelector('.page-nav a[data-dir=next]'); if(a) a.click(); }
+});
+
+const STORAGE_KEY = 'frida_read_progress';
+const CURRENT_CID = 'ch26';
+const ALL_CIDS = ["cover", "preface", "ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07", "ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14", "ch15", "ch16", "ch17", "ch18", "ch19", "ch20", "ch21", "ch22", "ch23", "ch24", "ch25", "ch26", "ch27", "ch28", "ch29", "ch30", "appendix-a", "appendix-b", "appendix-c", "about"];
+const TOTAL = ALL_CIDS.length;
+
+function getProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveProgress(p){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+function markRead(){
+  const p = getProgress();
+  if(!p[CURRENT_CID]){
+    p[CURRENT_CID] = new Date().toISOString();
+    saveProgress(p);
+  }
+  renderProgress();
+}
+function clearProgress(){
+  if(!confirm('确定要清除所有阅读记录吗？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderProgress();
+}
+function renderProgress(){
+  const p = getProgress();
+  const readCount = ALL_CIDS.filter(id => p[id]).length;
+  const pct = TOTAL ? Math.round(readCount / TOTAL * 100) : 0;
+  const fill = document.getElementById('readFill');
+  const text = document.getElementById('readText');
+  if(fill) fill.style.width = pct + '%';
+  if(text) text.textContent = readCount + ' / ' + TOTAL + ' 章（' + pct + '%）';
+  document.querySelectorAll('.read-dot').forEach(dot => {
+    dot.classList.toggle('done', !!p[dot.dataset.cid]);
+  });
+  const lastEl = document.getElementById('lastRead');
+  if(lastEl){
+    const entries = Object.entries(p).sort((a,b) => b[1].localeCompare(a[1]));
+    if(entries.length > 0){
+      const [lastCid, lastTime] = entries[0];
+      const link = document.querySelector('.toc-item[data-cid="'+lastCid+'"]');
+      const title = link ? link.textContent.trim() : lastCid;
+      const d = new Date(lastTime);
+      const timeStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+        +' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      lastEl.innerHTML = '上次阅读：<a href="'+lastCid+'.html">'+title+'</a><br><span style="font-size:.65rem">'+timeStr+'</span>';
+    } else {
+      lastEl.innerHTML = '<span style="color:var(--fg-dim)">还没有阅读记录</span>';
+    }
+  }
+  if(readCount === TOTAL && TOTAL > 0 && fill){
+    fill.style.background = 'linear-gradient(90deg,#4ade80,#22d3ee)';
+  }
+}
+let _marked = false;
+window.addEventListener('scroll', ()=>{
+  if(_marked) return;
+  const h = document.documentElement;
+  const scrollPct = h.scrollTop / (h.scrollHeight - h.clientHeight);
+  if(scrollPct > 0.8){
+    _marked = true;
+    markRead();
+  }
+}, {passive:true});
+window.addEventListener('load', ()=>{
+  const h = document.documentElement;
+  if(h.scrollHeight <= h.clientHeight * 1.3){
+    setTimeout(()=>{ markRead(); }, 2000);
+  }
+  renderProgress();
+});
+</script>
+</body>
+</html>
