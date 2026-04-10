@@ -127,12 +127,23 @@ build_pdf() {
       -V lang=zh-CN \
       -o "$html_single"
 
-    # 注入中文字体样式
+    # 注入封面页和中文字体样式
     python3 -c "
 import sys
 html = open(sys.argv[1], encoding='utf-8').read()
 css = '<style>body, p, h1, h2, h3, h4, h5, h6, li, td, th, span, div { font-family: \"Hiragino Sans GB\", \"Heiti SC\", \"STSong\", \"Arial Unicode MS\", sans-serif; } code, pre { font-family: Menlo, \"Hiragino Sans GB\", monospace; }</style>'
 html = html.replace('</head>', css + '</head>', 1)
+cover = '''<div style=\"text-align:center;page-break-after:always;padding-top:60px;\">
+<img src=\"cover.jpg\" style=\"max-width:400px;border-radius:12px;\" />
+<h1 style=\"font-size:2.2em;margin:0.6em 0 0.3em;\">$BOOK_TITLE</h1>
+<p style=\"font-size:1.2em;color:#666;margin:0.5em 0;\">作者：everettjf</p>
+<p style=\"font-size:1em;color:#888;margin:0.5em 0;\">使用 Claude Code 分析源码</p>
+<p style=\"font-size:0.9em;color:#999;margin:1.5em 0;\">深度解析 Frida 动态插桩框架的架构与设计思路</p>
+<p style=\"font-size:0.85em;color:#999;\">30 章正文 | 3 个附录 | 150+ 代码示例 | 40+ 架构图</p>
+<p style=\"font-size:0.85em;color:#aaa;margin-top:1em;\">Frida 官网: https://frida.re | GitHub: https://github.com/frida/frida</p>
+<p style=\"font-size:0.8em;color:#cc8800;margin-top:2em;border:1px solid #cc8800;display:inline-block;padding:6px 16px;border-radius:6px;\">本书由 Claude Code 分析 Frida 源码生成，人工校准仍在进行中</p>
+</div>'''
+html = html.replace('<body>', '<body>' + cover, 1)
 open(sys.argv[1], 'w', encoding='utf-8').write(html)
 " "$html_single"
 
@@ -180,6 +191,17 @@ import sys
 html = open(sys.argv[1], encoding='utf-8').read()
 css = '<style>body, p, h1, h2, h3, h4, h5, h6, li, td, th, span, div { font-family: \"Hiragino Sans GB\", \"Heiti SC\", \"STSong\", \"Arial Unicode MS\", sans-serif; } code, pre { font-family: Menlo, \"Hiragino Sans GB\", monospace; }</style>'
 html = html.replace('</head>', css + '</head>', 1)
+cover = '''<div style=\"text-align:center;page-break-after:always;padding-top:60px;\">
+<img src=\"cover.jpg\" style=\"max-width:400px;border-radius:12px;\" />
+<h1 style=\"font-size:2.2em;margin:0.6em 0 0.3em;\">$BOOK_TITLE</h1>
+<p style=\"font-size:1.2em;color:#666;margin:0.5em 0;\">作者：everettjf</p>
+<p style=\"font-size:1em;color:#888;margin:0.5em 0;\">使用 Claude Code 分析源码</p>
+<p style=\"font-size:0.9em;color:#999;margin:1.5em 0;\">深度解析 Frida 动态插桩框架的架构与设计思路</p>
+<p style=\"font-size:0.85em;color:#999;\">30 章正文 | 3 个附录 | 150+ 代码示例 | 40+ 架构图</p>
+<p style=\"font-size:0.85em;color:#aaa;margin-top:1em;\">Frida 官网: https://frida.re | GitHub: https://github.com/frida/frida</p>
+<p style=\"font-size:0.8em;color:#cc8800;margin-top:2em;border:1px solid #cc8800;display:inline-block;padding:6px 16px;border-radius:6px;\">本书由 Claude Code 分析 Frida 源码生成，人工校准仍在进行中</p>
+</div>'''
+html = html.replace('<body>', '<body>' + cover, 1)
 open(sys.argv[1], 'w', encoding='utf-8').write(html)
 " "$html_single"
         weasyprint "$html_single" "$pdf"

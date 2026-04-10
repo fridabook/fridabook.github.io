@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="cover.jpg" alt="封面" style="max-width: 400px; border-radius: 12px; margin-bottom: 1.5rem;" />
+
 # 解密 Frida
 
 ## 动态插桩框架源码之旅
