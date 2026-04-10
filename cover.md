@@ -20,6 +20,10 @@
 
 <br/>
 
+<div class="ai-notice" style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 12px 20px; margin: 20px auto; max-width: 600px; font-size: 15px; color: #856404;">
+⚠️ <strong>本书由 Claude Code 分析 Frida 源码生成，人工校准仍在进行中，目前进度 1%。</strong>
+</div>
+
 <div class="download-buttons">
 <a class="dl-btn dl-start" href="preface.html">开始阅读</a>
 <a class="dl-btn dl-pdf" href="https://github.com/fridabook/fridabook.github.io/releases/latest">PDF 下载</a>
