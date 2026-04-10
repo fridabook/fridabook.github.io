@@ -32,12 +32,20 @@
 <a class="dl-btn dl-start" href="preface.html">开始阅读</a>
 <a class="dl-btn dl-pdf" href="https://github.com/fridabook/fridabook.github.io/releases/latest">PDF 下载</a>
 <a class="dl-btn dl-epub" href="https://github.com/fridabook/fridabook.github.io/releases/latest">EPUB 下载</a>
+<a class="dl-btn dl-github" href="https://github.com/fridabook/fridabook.github.io">GitHub 源码</a>
 </div>
 
 <br/>
 
 <div class="version-info">
 当前版本：{{VERSION}}
+</div>
+
+<br/>
+
+<div class="wechat-qrcode" style="margin: 20px auto; text-align: center;">
+<p style="font-size: 15px; color: #aaa;">关注微信公众号，探索更多有趣的技术以及 AI 前沿技术</p>
+<img src="wx.png" alt="微信公众号" style="max-width: 200px; border-radius: 8px;" />
 </div>
 
 </div>

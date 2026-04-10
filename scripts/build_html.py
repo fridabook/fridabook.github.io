@@ -532,6 +532,13 @@ def main():
         if cid == "cover":
             open(os.path.join(out, "index.html"), "w", encoding="utf-8").write(html)
 
+    # 复制图片资源到输出目录
+    for img in ["wx.png", "cover.jpg"]:
+        img_path = os.path.join(src, img)
+        if os.path.isfile(img_path):
+            shutil.copy2(img_path, os.path.join(out, img))
+            print(f"  [CP]   {img}")
+
     print(f"\n  => {len(loaded)} 个页面已生成到 {out}/")
 
 if __name__ == "__main__":

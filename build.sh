@@ -37,6 +37,15 @@ check_dep() {
   fi
 }
 
+# 复制图片资源到输出目录
+copy_assets() {
+  for img in wx.png cover.jpg; do
+    if [[ -f "$img" ]]; then
+      cp "$img" "$OUTPUT_DIR/"
+    fi
+  done
+}
+
 # 合并所有章节为一个 Markdown 文件
 merge_chapters() {
   local output="$1"
@@ -50,6 +59,24 @@ merge_chapters() {
       warn "文件不存在，跳过: $ch"
     fi
   done
+
+  # 在最后追加微信公众号二维码
+  if [[ -f "wx.png" ]]; then
+    cat >> "$output" <<'WXEOF'
+
+---
+
+<div align="center">
+
+**关注微信公众号，探索更多有趣的技术以及 AI 前沿技术**
+
+![微信公众号](wx.png)
+
+</div>
+WXEOF
+  fi
+
+  copy_assets
   info "已合并 ${#CHAPTERS[@]} 个文件 → $output"
 }
 
@@ -96,6 +123,7 @@ build_pdf() {
       --toc-depth=2 \
       --metadata title="$BOOK_TITLE" \
       --highlight-style=tango \
+      --resource-path=".:$OUTPUT_DIR" \
       -V lang=zh-CN \
       -o "$html_single"
 
@@ -124,6 +152,7 @@ open(sys.argv[1], 'w', encoding='utf-8').write(html)
     --toc-depth=2 \
     --metadata title="$BOOK_TITLE" \
     --highlight-style=tango \
+    --resource-path=".:$OUTPUT_DIR" \
     -V geometry:margin=2.5cm \
     -V fontsize=11pt \
     -V documentclass=report \
@@ -143,6 +172,7 @@ open(sys.argv[1], 'w', encoding='utf-8').write(html)
           --toc-depth=2 \
           --metadata title="$BOOK_TITLE" \
           --highlight-style=tango \
+          --resource-path=".:$OUTPUT_DIR" \
           -V lang=zh-CN \
           -o "$html_single"
         python3 -c "
@@ -185,6 +215,7 @@ build_epub() {
     --metadata title="$BOOK_TITLE" \
     --metadata language="zh-CN" \
     --highlight-style=tango \
+    --resource-path=".:$OUTPUT_DIR" \
     $cover_opt \
     -o "$epub"
 
